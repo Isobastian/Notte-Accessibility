@@ -1,0 +1,47 @@
+{
+  "manifest_version": 3,
+  "name": "Notte — Dark Mode",
+  "version": "1.0",
+  "description": "Rende scuri i siti troppo chiari. Attiva/disattiva per singolo sito e regola luminosità e contrasto. Gratuita, per la comunità ipovedente.",
+  "icons": {
+    "48": "images/icon-48.png",
+    "64": "images/icon-64.png",
+    "96": "images/icon-96.png",
+    "128": "images/icon-128.png",
+    "256": "images/icon-256.png",
+    "512": "images/icon-512.png"
+  },
+  "permissions": [
+    "storage",
+    "activeTab"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "run_at": "document_start",
+      "all_frames": true
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "48": "images/icon-48.png",
+      "96": "images/icon-96.png",
+      "128": "images/icon-128.png"
+    }
+  },
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "notte-darkmode@sebastian",
+      "strict_min_version": "115.0"
+    }
+  }
+}

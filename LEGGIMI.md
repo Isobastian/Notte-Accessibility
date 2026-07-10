@@ -1,100 +1,51 @@
-# 🌙 Notte — Dark Mode (estensione Safari per iPhone)
+# 🌙 Notte — Dark Mode
 
-Estensione Safari che rende scuri i siti troppo chiari. Funziona su iPhone e iPad
-(e anche su Safari per Mac). Puoi accenderla/spegnerla per singolo sito e regolare
-luminosità e contrasto.
+Estensione **gratuita** che rende scuri i siti troppo chiari, per **Chrome,
+Firefox e Safari** (iPhone, iPad e Mac). Interruttore per singolo sito, regolazione
+di luminosità e contrasto, foto e video lasciati a colori naturali.
 
-Questa cartella contiene **l'estensione web** completa. Per farla diventare un'app
-installabile su iPhone serve un passaggio in **Xcode** (su un Mac), spiegato sotto.
-Non serve scrivere altro codice: Xcode fa quasi tutto da solo.
+Nata come strumento di accessibilità **per la comunità ipovedente** — gratis per
+sempre, senza pubblicità, senza donazioni, senza tracciamento.
 
----
-
-## Cosa c'è dentro
-
+## Com'è organizzata
 ```
-Notte-DarkMode/
-├─ manifest.json     → configurazione dell'estensione
-├─ content.js        → applica la modalità scura alle pagine
-├─ popup.html        → il pannello con gli interruttori
-├─ popup.js          → logica del pannello
-└─ images/           → icone (48…512 px)
+chrome/    Versione pronta per Chrome / Edge / Brave
+firefox/   Versione per Firefox (con l'id richiesto da AMO)
+safari/    Stesso codice, da avvolgere con Xcode per Safari (iOS + Mac)
+tools/sync.sh   Copia i file condivisi da chrome/ verso firefox/ e safari/
 ```
+Le tre cartelle condividono `content.js`, `popup.*` e `images/` identici: cambia
+solo il `manifest.json`. Se modifichi qualcosa, fallo in `chrome/` e poi lancia
+`tools/sync.sh` per aggiornare le altre due.
 
----
+## Come si prova / installa
 
-## Cosa ti serve
+### Chrome (anche Edge e Brave)
+1. Apri `chrome://extensions`, attiva **Modalità sviluppatore** (in alto a destra).
+2. **Carica estensione non pacchettizzata** → scegli la cartella `chrome/`.
+Per pubblicarla: comprimi `chrome/` in zip e caricala sul Chrome Web Store
+(quota di **5 $ una tantum**).
 
-- Un **Mac** con **Xcode** installato (gratis dall'App Store).
-- Il tuo **account Apple Developer** (che hai già ✅).
-- Un **iPhone** per provarla (opzionale: c'è anche il simulatore).
+### Firefox
+1. Apri `about:debugging` → **Questo Firefox** → **Carica componente temporaneo** →
+   seleziona un file qualsiasi dentro `firefox/`.
+Per pubblicarla: carica la cartella `firefox/` su addons.mozilla.org (**gratis**).
 
----
-
-## Passo 1 — Trasforma l'estensione in un progetto Xcode
-
-Apri l'app **Terminale** sul Mac e incolla questo comando, sostituendo il percorso
-con quello della cartella `Notte-DarkMode` (puoi trascinare la cartella nel Terminale
-per far comparire il percorso):
-
+### Safari (iPhone, iPad, Mac) — serve un Mac con Xcode
+Nel Terminale (trascina la cartella `safari` per ottenere il percorso):
 ```bash
-xcrun safari-web-extension-converter /percorso/della/Notte-DarkMode \
-  --app-name "Notte" \
-  --bundle-identifier com.tuonome.notte \
-  --project-location ~/Desktop \
-  --ios-only
+xcrun safari-web-extension-converter /percorso/della/safari \
+  --app-name "Notte" --bundle-identifier com.tuonome.notte \
+  --project-location ~/Desktop
 ```
+(Solo iPhone/iPad? aggiungi `--ios-only`; senza, fa anche Safari per Mac.)
+Poi in Xcode: **Signing & Capabilities → Team** = il tuo account, premi **▶︎ Run**
+sull'iPhone, e attiva l'estensione in **Impostazioni → Safari → Estensioni →
+Notte**. Per pubblicarla: **Product → Archive → Distribute → App Store Connect**.
 
-- Cambia `com.tuonome.notte` in un identificativo tuo e unico (es. `com.mario.notte`).
-- Al termine si aprirà automaticamente il progetto in Xcode.
+## Come funziona
+Notte applica un filtro `invert + hue-rotate` alla pagina: metodo affidabile che
+funziona su qualunque sito senza romperne il layout. Foto e video vengono
+ri-invertiti così restano a colori naturali (opzione disattivabile).
 
-> Se preferisci non usare il Terminale: in Xcode scegli
-> **File → New → Project → Safari Extension App**, poi sostituisci i file generati
-> in `Resources/` con quelli di questa cartella.
-
----
-
-## Passo 2 — Firma e prova sul tuo iPhone
-
-1. In Xcode, in alto, seleziona il target che finisce con **(iOS)**.
-2. Vai su **Signing & Capabilities** → alla voce **Team** scegli il tuo account Developer.
-3. Collega l'iPhone col cavo, selezionalo come dispositivo in alto, premi **▶︎ (Run)**.
-4. Sull'iPhone apri **Impostazioni → App → Safari → Estensioni** (o
-   **Impostazioni → Safari → Estensioni**) → attiva **Notte**.
-5. Alla richiesta dei permessi, scegli **Consenti** e **Consenti su tutti i siti**
-   (serve perché possa oscurare qualsiasi pagina).
-6. Apri Safari, tocca il pulsante **ᴀA** (o il pezzo dell'estensione) nella barra
-   indirizzi → **Notte** → et voilà: compare il pannello con gli interruttori.
-
----
-
-## Passo 3 — Pubblicarla sull'App Store (per tutti, gratis per chi la scarica)
-
-1. In Xcode: menu **Product → Archive**.
-2. Nella finestra Organizer premi **Distribute App → App Store Connect → Upload**.
-3. Vai su [App Store Connect](https://appstoreconnect.apple.com) → **My Apps → +**
-   e crea la scheda dell'app (nome, categoria, descrizione, privacy).
-4. Carica un paio di **schermate**, associa la build appena caricata e premi
-   **Submit for Review**.
-5. La revisione di Apple richiede in genere **1–3 giorni**.
-
-Nota: l'account Developer (99 $/anno) lo paghi tu una volta; **chi scarica l'app
-non paga nulla** se la pubblichi come gratuita.
-
----
-
-## Come funziona (in breve)
-
-Notte applica un filtro `invert + hue-rotate` alla pagina: è il metodo più
-**affidabile** perché funziona su qualunque sito senza romperne il layout. Le foto e
-i video vengono ri-invertiti così restano a colori naturali (puoi disattivarlo).
-Se un sito ha già una sua dark mode e non vuoi lo scuro doppio, basta spegnere Notte
-solo su quel sito con l'interruttore **"Scuro su questo sito"**.
-
-## Idee per migliorarla in futuro
-
-- Aggiungere una modalità "scuro dinamico" (colori reali invece dell'inversione).
-- Pianificazione automatica (attiva solo la sera).
-- Sincronizzazione delle eccezioni tra i tuoi dispositivi via iCloud.
-
-Se vuoi, posso implementarne una di queste: dimmi quale.
+💙 Fatta per gli eternauti ipovedenti. Buona luce (bassa).

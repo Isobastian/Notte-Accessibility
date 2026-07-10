@@ -1,4 +1,4 @@
-/* Notte — Dark Mode · logica del popup */
+/* Notte - Dark Mode - logica del popup */
 (function () {
   "use strict";
 
@@ -9,6 +9,7 @@
     brightness: 100,
     contrast: 100,
     keepImages: true,
+    autoSkipDark: true,
     overrides: {}
   };
 
@@ -25,6 +26,7 @@
     contrast: document.getElementById("contrast"),
     contrastVal: document.getElementById("contrastVal"),
     keepImages: document.getElementById("keepImages"),
+    autoSkip: document.getElementById("autoSkip"),
     globalToggle: document.getElementById("globalToggle")
   };
 
@@ -81,6 +83,7 @@
     el.contrast.value = settings.contrast;
     el.contrastVal.textContent = settings.contrast + "%";
     el.keepImages.checked = settings.keepImages;
+    el.autoSkip.checked = settings.autoSkipDark;
     el.globalToggle.checked = settings.enabled;
   }
 
@@ -109,6 +112,11 @@
 
   el.keepImages.addEventListener("change", function () {
     settings.keepImages = el.keepImages.checked;
+    save();
+  });
+
+  el.autoSkip.addEventListener("change", function () {
+    settings.autoSkipDark = el.autoSkip.checked;
     save();
   });
 
