@@ -1,17 +1,15 @@
-/* Notte - Dark Mode - logica del popup */
+/* Notte - Dark Mode - popup logic */
 (function () {
   "use strict";
 
   var api = (typeof browser !== "undefined") ? browser : chrome;
 
-  var DEFAULTS = {
-    enabled: true,
-    brightness: 100,
-    contrast: 100,
-    keepImages: true,
-    autoSkipDark: true,
-    overrides: {}
-  };
+  // enabled/autoSkipDark/keepImages/brightness/contrast are no longer
+  // configurable from the popup: new sites always start dark, sites that are
+  // already dark are always detected and left alone, images always stay in
+  // their natural colors (see content.js). The only thing left is the
+  // per-site switch (`overrides`).
+  var DEFAULTS = { overrides: {} };
 
   var host = "";
   var settings = null;
@@ -19,15 +17,7 @@
   var el = {
     host: document.getElementById("host"),
     siteToggle: document.getElementById("siteToggle"),
-    siteDesc: document.getElementById("siteDesc"),
-    resetSite: document.getElementById("resetSite"),
-    brightness: document.getElementById("brightness"),
-    brightVal: document.getElementById("brightVal"),
-    contrast: document.getElementById("contrast"),
-    contrastVal: document.getElementById("contrastVal"),
-    keepImages: document.getElementById("keepImages"),
-    autoSkip: document.getElementById("autoSkip"),
-    globalToggle: document.getElementById("globalToggle")
+    siteDesc: document.getElementById("siteDesc")
   };
 
   function getSettings() {
@@ -66,66 +56,21 @@
     if (Object.prototype.hasOwnProperty.call(settings.overrides, host)) {
       return settings.overrides[host];
     }
-    return settings.enabled;
-  }
-
-  function hasOverride() {
-    return Object.prototype.hasOwnProperty.call(settings.overrides, host);
+    return true; // new sites always start dark
   }
 
   function refresh() {
-    el.host.textContent = host || "questa pagina";
+    el.host.textContent = host || "this page";
     el.siteToggle.checked = siteEnabled();
-    el.siteDesc.textContent = siteEnabled() ? "Attivo" : "Disattivato";
-    el.resetSite.hidden = !hasOverride();
-    el.brightness.value = settings.brightness;
-    el.brightVal.textContent = settings.brightness + "%";
-    el.contrast.value = settings.contrast;
-    el.contrastVal.textContent = settings.contrast + "%";
-    el.keepImages.checked = settings.keepImages;
-    el.autoSkip.checked = settings.autoSkipDark;
-    el.globalToggle.checked = settings.enabled;
+    el.siteDesc.textContent = siteEnabled() ? "On" : "Off";
   }
 
   el.siteToggle.addEventListener("change", function () {
-    if (!host) { settings.enabled = el.siteToggle.checked; }
-    else { settings.overrides[host] = el.siteToggle.checked; }
+    settings.overrides[host] = el.siteToggle.checked;
     save(); refresh();
   });
 
-  el.resetSite.addEventListener("click", function () {
-    delete settings.overrides[host];
-    save(); refresh();
-  });
-
-  el.brightness.addEventListener("input", function () {
-    settings.brightness = parseInt(el.brightness.value, 10);
-    el.brightVal.textContent = settings.brightness + "%";
-    save();
-  });
-
-  el.contrast.addEventListener("input", function () {
-    settings.contrast = parseInt(el.contrast.value, 10);
-    el.contrastVal.textContent = settings.contrast + "%";
-    save();
-  });
-
-  el.keepImages.addEventListener("change", function () {
-    settings.keepImages = el.keepImages.checked;
-    save();
-  });
-
-  el.autoSkip.addEventListener("change", function () {
-    settings.autoSkipDark = el.autoSkip.checked;
-    save();
-  });
-
-  el.globalToggle.addEventListener("change", function () {
-    settings.enabled = el.globalToggle.checked;
-    save(); refresh();
-  });
-
-  // Avvio
+  // Start
   Promise.all([getSettings(), getActiveHost()]).then(function (res) {
     settings = res[0] || DEFAULTS;
     if (!settings.overrides) settings.overrides = {};
