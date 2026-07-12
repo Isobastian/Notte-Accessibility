@@ -35,13 +35,53 @@
    * custom no.
    */
   var shadowRoots = [];
+  // Registra uno shadow root: base CSS, observer e ANCHE i listener di hover.
+  // Questi ultimi sono fondamentali: quando il mouse si sposta TRA elementi
+  // dentro uno shadow root, target e relatedTarget vengono ritarghettati
+  // entrambi sull'host, e per specifica l'evento NON viene consegnato ai
+  // listener fuori dal root (document) - verificato dal vivo su App Store
+  // Connect: passando tra le voci del menu account (dentro <amp-nav>) al
+  // document arrivava UN solo mouseover (l'ingresso nel componente), poi piu'
+  // nulla. Per questo la protezione hover non scattava MAI sulle voci del
+  // menu. Ascoltiamo quindi direttamente dentro ogni shadow root.
+  function registerShadowRoot(root) {
+    if (!root || shadowRoots.indexOf(root) !== -1) return false;
+    shadowRoots.push(root);
+    attachHoverListeners(root);
+    if (themed) { ensureBase(root); observeRoot(root); }
+    return true;
+  }
   document.addEventListener("__notte_shadow_attached__", function (e) {
     var shadowHost = e.target; // rinominato per non fare ombra alla var "host" (hostname) usata altrove
     if (!shadowHost || !shadowHost.shadowRoot) return;
-    var root = shadowHost.shadowRoot;
-    if (shadowRoots.indexOf(root) === -1) shadowRoots.push(root);
-    if (themed) { ensureBase(root); walk(root); observeRoot(root); }
+    if (registerShadowRoot(shadowHost.shadowRoot) && themed) walk(shadowHost.shadowRoot);
   }, true);
+
+  // Vedi shadow-patch.js: le regole CSS aggiunte via CSSOM (insertRule, usato
+  // da styled-components in produzione) NON producono mutazioni DOM. Se una
+  // regola arriva dopo l'ultima passata (es. modulo grafici caricato tardi su
+  // App Store Connect), gli elementi gia' processati restavano coi colori
+  // vecchi per sempre (bug: card bianche in Analytics). All'avviso ri-passiamo
+  // il DOM, con debounce: tanti avvisi ravvicinati = una sola passata, e
+  // applyColor e' comunque un no-op dove non e' cambiato nulla.
+  // Debounce CON tetto massimo: un debounce solo "trailing" verrebbe
+  // rimandato all'infinito da un sito che inserisce regole di continuo
+  // (es. grafici che si ridisegnano) e la ripassata non partirebbe mai
+  // (bug: card rimaste bianche finche' non si ricaricava la pagina).
+  // Garantiamo una passata entro ~500ms dal primo avviso, sempre.
+  var cssRethemeTimer = null, cssRethemeFirst = 0;
+  function scheduleRetheme() {
+    if (!themed) return;
+    var now = Date.now();
+    if (!cssRethemeTimer) cssRethemeFirst = now;
+    else clearTimeout(cssRethemeTimer);
+    var wait = (now - cssRethemeFirst > 500) ? 0 : 150;
+    cssRethemeTimer = setTimeout(function () {
+      cssRethemeTimer = null;
+      if (themed) applyTheme();
+    }, wait);
+  }
+  document.addEventListener("__notte_css_changed__", scheduleRetheme, true);
 
   /* ---------- Matematica dei colori (rimappatura in HSL) ---------- */
   function parseColor(str) {
@@ -59,7 +99,48 @@
     // usano oklch/oklab per i colori).
     var o = str.match(/oklch\(([^)]+)\)/i);
     if (o) return oklchToRgb(o[1]);
+    // Safari (soprattutto sui siti Apple, es. App Store Connect) serializza i
+    // colori wide-gamut come "color(display-p3 r g b / a)" o "color(srgb ...)"
+    // in getComputedStyle. Senza gestirli parseColor tornava null e l'elemento
+    // restava chiaro SOLO su Safari (Chrome riceve/risolve rgb normale) - bug:
+    // fasce bianche su App Store Connect solo in Safari.
+    var k = str.match(/color\(\s*(srgb|display-p3)\s+([^)]+)\)/i);
+    if (k) return colorFuncToRgb(k[1].toLowerCase(), k[2]);
     return null;
+  }
+
+  // Converte "color(srgb r g b / a)" o "color(display-p3 r g b / a)" (componenti
+  // 0-1 o percentuali) in {r,g,b,a} sRGB 0-255. Per display-p3: linearizza,
+  // matrice P3->sRGB lineare (CSS Color 4), poi ri-applica la gamma sRGB.
+  function colorFuncToRgb(space, inner) {
+    var parts = inner.split("/");
+    var a = 1;
+    if (parts.length > 1) {
+      var av = parts[1].trim();
+      a = av.indexOf("%") !== -1 ? parseFloat(av) / 100 : parseFloat(av);
+      if (isNaN(a)) a = 1;
+    }
+    var comps = parts[0].trim().split(/\s+/);
+    if (comps.length < 3) return null;
+    function num(v) {
+      if (v === "none") return 0;
+      return v.indexOf("%") !== -1 ? parseFloat(v) / 100 : parseFloat(v);
+    }
+    var r = num(comps[0]), g = num(comps[1]), b = num(comps[2]);
+    if (isNaN(r) || isNaN(g) || isNaN(b)) return null;
+    function to255(c) { return Math.round(Math.max(0, Math.min(1, c)) * 255); }
+    if (space === "srgb") return { r: to255(r), g: to255(g), b: to255(b), a: a };
+    // display-p3
+    function lin(c) { c = Math.max(0, Math.min(1, c)); return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4); }
+    var rl = lin(r), gl = lin(g), bl = lin(b);
+    var R = 1.2249401762805786 * rl - 0.2249401762805786 * gl;
+    var G = -0.0420569547096881 * rl + 1.0420569547096881 * gl;
+    var B = -0.0196375545903344 * rl - 0.0786360455506319 * gl + 1.0982735901409634 * bl;
+    function toS(c) {
+      var v = c <= 0.0031308 ? 12.92 * c : 1.055 * Math.pow(Math.max(c, 0), 1 / 2.4) - 0.055;
+      return Math.round(Math.max(0, Math.min(1, v)) * 255);
+    }
+    return { r: toS(R), g: toS(G), b: toS(B), a: a };
   }
 
   // Converte oklch(L C H [/ A]) in {r,g,b,a} sRGB (0-255). Formule standard
@@ -227,13 +308,33 @@
            "*" + SEL + "::-webkit-scrollbar,*" + SEL + "::-webkit-scrollbar-corner{background:#1a1a1a !important;border:0 !important;box-shadow:none !important;outline:none !important;}" +
            "*" + SEL + "::-webkit-scrollbar-track,*" + SEL + "::-webkit-scrollbar-track-piece,*" + SEL + "::-webkit-scrollbar-button{background:#1a1a1a !important;border:0 !important;box-shadow:none !important;outline:none !important;}" +
            "*" + SEL + "::-webkit-scrollbar-thumb{background:#5a5a5a !important;border-radius:8px;border:0 !important;box-shadow:none !important;outline:none !important;}" +
+           // Consumano le CSS variable messe inline da applyPseudo(): scuriscono
+           // i ::before/::after con sfondo chiaro (irraggiungibili dal walk).
+           "[data-notte-before]" + SEL + "::before{background-color:var(--notte-before-bg,#141414) !important;background-image:none !important;}" +
+           "[data-notte-after]" + SEL + "::after{background-color:var(--notte-after-bg,#141414) !important;background-image:none !important;}" +
+           // Bordi chiari dei pseudo-elementi, un attributo/variabile per LATO
+           // (mai lo shorthand border-color: annullerebbe i lati trasparenti
+           // dei triangoli/caret CSS). Vedi applyPseudo().
+           "[data-notte-before-bt]" + SEL + "::before{border-top-color:var(--notte-before-bt) !important;}" +
+           "[data-notte-before-br]" + SEL + "::before{border-right-color:var(--notte-before-br) !important;}" +
+           "[data-notte-before-bb]" + SEL + "::before{border-bottom-color:var(--notte-before-bb) !important;}" +
+           "[data-notte-before-bl]" + SEL + "::before{border-left-color:var(--notte-before-bl) !important;}" +
+           "[data-notte-after-bt]" + SEL + "::after{border-top-color:var(--notte-after-bt) !important;}" +
+           "[data-notte-after-br]" + SEL + "::after{border-right-color:var(--notte-after-br) !important;}" +
+           "[data-notte-after-bb]" + SEL + "::after{border-bottom-color:var(--notte-after-bb) !important;}" +
+           "[data-notte-after-bl]" + SEL + "::after{border-left-color:var(--notte-after-bl) !important;}" +
            // Rimedio best-effort per gli stati :hover/:focus puramente CSS (nessuna
            // mutazione DOM, quindi invisibili al nostro walk/observer basato su JS):
            // alcuni siti mostrano un lampo bianco al passaggio del mouse tramite
            // background-image/filter invece che background-color (che gia'
            // controlliamo). Non tocchiamo background-color qui per non annullare
            // gli hover colorati intenzionali (bottoni, badge...).
-           "*:hover,*:focus{background-image:none !important;filter:none !important;backdrop-filter:none !important;}";
+           "*:hover,*:focus{background-image:none !important;filter:none !important;backdrop-filter:none !important;}" +
+           // Idem per gli highlight di hover disegnati dai pseudo-elementi
+           // (gradienti/immagini chiare che compaiono solo su :hover, fuori
+           // dalla portata del walk): spegniamo il background-image, il
+           // background-color eventuale resta e viene gestito da hoverProtect.
+           "*:hover::before,*:hover::after{background-image:none !important;filter:none !important;}";
   }
   // root puo' essere il document principale o uno shadow root: uno shadow
   // root NON eredita il <style> messo in document.head (incapsulamento), per
@@ -289,6 +390,116 @@
     el[key] = el.style.getPropertyValue(prop);
   }
 
+  // Alcuni pannelli (es. header di App Store Connect) NON usano
+  // background-color ma un GRADIENTE chiaro via background-image: il nostro
+  // override inline di background-color non lo copre, e il pannello restava
+  // bianco con sopra il testo gia' schiarito da noi (illeggibile). Qui, se
+  // l'elemento ha un gradiente i cui colori sono in media CHIARI, lo
+  // spegniamo; se sotto non c'e' un background-color visibile, mettiamo il
+  // nero neutro standard. I gradienti scuri o d'accento (bottoni colorati)
+  // NON vengono toccati, e nemmeno i background-image con url(...) (immagini
+  // vere, es. avatar/loghi: devono restare come le foto).
+  // Decide se un gradiente CSS e' "chiaro" e va spento (elementi normali E
+  // pseudo-elementi). Due criteri: media dei colori-stop chiara (gradiente
+  // tutto chiaro), OPPURE anche un solo stop molto chiaro. Il secondo serve
+  // per i gradienti misti tipo bianco->nero (pagina di login di Outlook Web):
+  // la media risulta "scura" ma meta' pagina resta un lenzuolo bianco.
+  function gradientIsLight(bgi) {
+    if (!bgi || bgi === "none" || bgi.indexOf("gradient") === -1) return false;
+    var stops = bgi.match(/rgba?\([^)]+\)|oklch\([^)]+\)|color\([^)]+\)/gi);
+    if (!stops) return false;
+    var sum = 0, n = 0, max = 0;
+    for (var i = 0; i < stops.length; i++) {
+      var c = parseColor(stops[i]);
+      if (c && c.a > 0.05) {
+        var L = luminance(c);
+        sum += L; n++;
+        if (L > max) max = L;
+      }
+    }
+    if (!n) return false;
+    return (sum / n) >= 150 || max >= 170;
+  }
+
+  function applyBgImage(el, cs) {
+    var key = "__notte_background-image";
+    var current = el.style.getPropertyValue("background-image");
+    if (current && current === el[key]) return; // nostro override ancora attivo
+    var bgi = cs.backgroundImage;
+    if (!bgi || bgi === "none" || bgi.indexOf("url(") !== -1) return; // niente, o immagine vera: non toccare
+    if (!gradientIsLight(bgi)) return; // solo gradienti CHIARI (media o singolo stop)
+    el.style.setProperty("background-image", "none", "important");
+    el[key] = el.style.getPropertyValue("background-image");
+    var under = parseColor(cs.backgroundColor);
+    if (!under || under.a <= 0.05) {
+      // senza il gradiente l'elemento sarebbe trasparente: nero neutro fisso
+      el.style.setProperty("background-color", "rgb(20,20,20)", "important");
+      el["__notte_background-color"] = el.style.getPropertyValue("background-color");
+    }
+  }
+
+  // ::before/::after NON sono nodi del DOM: il walk non li raggiunge e lo
+  // stile inline per loro non esiste (bug: fascia bianca su App Store Connect
+  // in Safari, ".sticky-header::before{background-color:#fff}" disegnata SOPRA
+  // il nostro header gia' scurito). Strategia: leggiamo il computed style del
+  // pseudo-elemento; se ha uno sfondo CHIARO (tinta piena o gradiente), noi
+  // (1) marchiamo l'elemento con un attributo data-notte-* e (2) gli passiamo
+  // il colore rimappato via CSS variable inline — le variabili definite
+  // sull'elemento si propagano ai SUOI pseudo-elementi, e la regola generica
+  // che le consuma vive nel base CSS. Pseudo con url(...) o gia' scuri non
+  // vengono toccati (icone, decorazioni, ombre). Una volta scurito, al giro
+  // dopo il computed risulta scuro e non si riscrive nulla (niente loop).
+  function applyPseudo(el) {
+    for (var i = 0; i < 2; i++) {
+      var which = i === 0 ? "before" : "after";
+      var pcs;
+      try { pcs = getComputedStyle(el, "::" + which); } catch (e) { continue; }
+      if (!pcs || pcs.content === "none") continue;
+      var bgi = pcs.backgroundImage;
+      if (bgi && bgi.indexOf("url(") !== -1) continue; // immagine vera: non toccare
+      var c = parseColor(pcs.backgroundColor);
+      var out = null;
+      if (c && c.a > 0.05 && luminance(c) >= 150) out = remap(c, "bg");
+      else if (gradientIsLight(bgi)) out = "rgb(20,20,20)";
+      if (out) {
+        var vn = "--notte-" + which + "-bg";
+        if (el.style.getPropertyValue(vn) !== out) el.style.setProperty(vn, out);
+        if (!el.hasAttribute("data-notte-" + which)) el.setAttribute("data-notte-" + which, "");
+      }
+      // Bordi chiari del pseudo-elemento, lato per lato (i triangoli/caret
+      // CSS hanno lati trasparenti che NON vanno toccati, quindi niente
+      // shorthand border-color): una variabile e un attributo per lato.
+      var SIDES = ["top", "right", "bottom", "left"];
+      for (var s = 0; s < 4; s++) {
+        var side = SIDES[s];
+        if (parseFloat(pcs["border" + side.charAt(0).toUpperCase() + side.slice(1) + "Width"]) > 0) {
+          var bc = parseColor(pcs["border" + side.charAt(0).toUpperCase() + side.slice(1) + "Color"]);
+          if (bc && bc.a > 0.05 && luminance(bc) >= 150) {
+            var bout = remap(bc, "br");
+            var bvn = "--notte-" + which + "-b" + side.charAt(0);
+            if (el.style.getPropertyValue(bvn) !== bout) el.style.setProperty(bvn, bout);
+            var attr = "data-notte-" + which + "-b" + side.charAt(0);
+            if (!el.hasAttribute(attr)) el.setAttribute(attr, "");
+          }
+        }
+      }
+    }
+  }
+
+  // Rimuove tutti i marchi/variabili pseudo-elemento messi da applyPseudo
+  // (usato da resyncEl e removeTheme).
+  function clearPseudoMarks(el) {
+    var whichs = ["before", "after"], letters = ["t", "r", "b", "l"];
+    for (var i = 0; i < 2; i++) {
+      var w = whichs[i];
+      if (el.hasAttribute("data-notte-" + w)) { el.removeAttribute("data-notte-" + w); el.style.removeProperty("--notte-" + w + "-bg"); }
+      for (var j = 0; j < 4; j++) {
+        var attr = "data-notte-" + w + "-b" + letters[j];
+        if (el.hasAttribute(attr)) { el.removeAttribute(attr); el.style.removeProperty("--notte-" + w + "-b" + letters[j]); }
+      }
+    }
+  }
+
   var STYLE_SIG = "__notteStyleSig";
 
   function styleEl(el) {
@@ -303,7 +514,18 @@
 
     applyColor(el, "background-color", "bg", cs.backgroundColor);
     applyColor(el, "color", "fg", cs.color);
-    if (parseFloat(cs.borderTopWidth) > 0) applyColor(el, "border-color", "br", cs.borderTopColor);
+    // Bordi LATO PER LATO, non col solo borderTop come prima: un divisore
+    // fatto con solo border-bottom, o un triangolino/caret CSS (width:0 +
+    // border-bottom colorato e lati trasparenti, es. la freccetta del menu
+    // account di App Store Connect) hanno borderTopWidth=0 e restavano
+    // chiari. I lati trasparenti vengono saltati da applyColor (alpha ~0),
+    // quindi i triangoli restano triangoli.
+    if (parseFloat(cs.borderTopWidth) > 0) applyColor(el, "border-top-color", "br", cs.borderTopColor);
+    if (parseFloat(cs.borderRightWidth) > 0) applyColor(el, "border-right-color", "br", cs.borderRightColor);
+    if (parseFloat(cs.borderBottomWidth) > 0) applyColor(el, "border-bottom-color", "br", cs.borderBottomColor);
+    if (parseFloat(cs.borderLeftWidth) > 0) applyColor(el, "border-left-color", "br", cs.borderLeftColor);
+    applyBgImage(el, cs);
+    applyPseudo(el);
     el[MARK] = 1;
     // Firma dello stile inline dopo la nostra scrittura: serve all'observer
     // per riconoscere "questa mutazione l'ho appena fatta io" ed evitare di
@@ -328,7 +550,21 @@
     if (el.__notteHovering) return; // non toccare un elemento protetto da hoverProtect()
     el.style.removeProperty("background-color");
     el.style.removeProperty("color");
-    el.style.removeProperty("border-color");
+    el.style.removeProperty("border-top-color");
+    el.style.removeProperty("border-right-color");
+    el.style.removeProperty("border-bottom-color");
+    el.style.removeProperty("border-left-color");
+    // background-image: rimuoverlo SOLO se l'abbiamo messo noi. Un sito puo'
+    // avere un background-image inline suo (es. avatar via url(...)): se lo
+    // togliessimo qui, styleEl non lo ripristinerebbe mai (noi non salviamo
+    // i valori originali del sito).
+    if (el["__notte_background-image"] !== undefined) {
+      el.style.removeProperty("background-image");
+      el["__notte_background-image"] = undefined;
+    }
+    // Pseudo-elementi: togliamo i marchi cosi' styleEl() rivaluta da zero
+    // il vero colore sottostante (il sito potrebbe aver cambiato lo stato).
+    clearPseudoMarks(el);
     styleEl(el);
   }
 
@@ -344,7 +580,13 @@
       var end = Math.min(i + 400, list.length);
       for (; i < end; i++) {
         styleEl(list[i]);
-        if (list[i].shadowRoot) walk(list[i].shadowRoot); // scende anche negli shadow root aperti
+        if (list[i].shadowRoot) {
+          // Scende negli shadow root aperti; registra anche quelli non
+          // annunciati da shadow-patch (rete di sicurezza: listener hover,
+          // observer e base CSS servono in OGNI root).
+          registerShadowRoot(list[i].shadowRoot);
+          walk(list[i].shadowRoot);
+        }
       }
       if (i < list.length) window.setTimeout(chunk, 0);
     }
@@ -352,11 +594,14 @@
   }
 
   var observer = null;
-  // Osserviamo anche gli attributi style/class: le web-app complesse spesso
-  // ritoccano lo stile inline di un elemento gia' esistente (senza
-  // aggiungere/rimuovere nodi), il che sfuggirebbe a un observer in sola
-  // modalita' childList. Vedi commento su applyColor().
-  var OBSERVE_OPTS = { childList: true, subtree: true, attributes: true, attributeFilter: ["style", "class"] };
+  // Osserviamo TUTTI gli attributi, non solo style/class: i framework moderni
+  // (React Aria - usato da App Store Connect, vedi data-react-aria-pressable)
+  // pilotano hover/selezione/focus con attributi data-* (data-hovered,
+  // data-focused...) e il CSS si aggancia a quelli. Con il filtro
+  // ["style","class"] quei cambi di stato erano invisibili: lo sfondo
+  // diventava chiaro senza che noi lo ritematizzassimo (bug: hover del menu
+  // account e card "a volte bianche a volte nere" su App Store Connect).
+  var OBSERVE_OPTS = { childList: true, subtree: true, attributes: true };
   function observeRoot(root) {
     if (!observer) return;
     try { observer.observe(root, OBSERVE_OPTS); } catch (e) {}
@@ -367,22 +612,40 @@
       for (var i = 0; i < muts.length; i++) {
         var m = muts[i];
         if (m.type === "attributes") {
+          var an = m.attributeName || "";
+          // Le NOSTRE marcature pseudo-elemento non devono rincorrersi da sole.
+          if (an.indexOf("data-notte-") === 0) continue;
           var el = m.target;
-          if (m.attributeName === "class") {
-            // Il sito ha cambiato una classe (es. :hover via JS, riga
-            // selezionata): il nostro inline vincerebbe comunque su
-            // getComputedStyle, quindi serve resyncEl() per leggere il vero
-            // colore sottostante, non il semplice styleEl().
-            resyncEl(el);
-          } else if (m.attributeName === "style" && el.getAttribute("style") !== el[STYLE_SIG]) {
+          if (an === "style") {
             // Confrontiamo con la firma dell'ultima scrittura NOSTRA: se
             // combacia e' solo l'eco della nostra stessa modifica (altrimenti
             // loop infinito) - se e' diversa, e' stato il sito a toccarlo.
+            if (el.getAttribute("style") !== el[STYLE_SIG]) resyncEl(el);
+          } else {
+            // class, data-hovered/data-selected/aria-*: qualunque attributo
+            // puo' cambiare lo stato visivo via CSS. Il nostro inline
+            // vincerebbe comunque su getComputedStyle, quindi serve
+            // resyncEl() per leggere il vero colore sottostante.
             resyncEl(el);
           }
         } else {
           var nodes = m.addedNodes;
-          for (var j = 0; j < nodes.length; j++) walk(nodes[j]);
+          if (nodes.length) sentinelSoon(); // vedi sentinelSoon: SPA nav
+          for (var j = 0; j < nodes.length; j++) {
+            var n = nodes[j];
+            walk(n);
+            // Un <style> o <link rel="stylesheet"> aggiunto cambia i colori
+            // anche di elementi GIA' processati: il walk del solo nodo
+            // aggiunto non basta, serve una ripassata completa (per i <link>
+            // anche al load, quando le regole sono davvero attive).
+            if (n.nodeType === 1) {
+              if (n.tagName === "STYLE" && n.id !== BASE_ID) scheduleRetheme();
+              else if (n.tagName === "LINK" && /stylesheet/i.test(n.rel || "")) {
+                scheduleRetheme();
+                n.addEventListener("load", scheduleRetheme);
+              }
+            }
+          }
         }
       }
     });
@@ -416,7 +679,15 @@
           if (el[MARK]) {
             el.style.removeProperty("background-color");
             el.style.removeProperty("color");
-            el.style.removeProperty("border-color");
+            el.style.removeProperty("border-top-color");
+            el.style.removeProperty("border-right-color");
+            el.style.removeProperty("border-bottom-color");
+            el.style.removeProperty("border-left-color");
+            if (el["__notte_background-image"] !== undefined) {
+              el.style.removeProperty("background-image");
+              el["__notte_background-image"] = undefined;
+            }
+            clearPseudoMarks(el);
             el[MARK] = 0;
           }
         }
@@ -437,6 +708,14 @@
     return tag === "IMG" || tag === "VIDEO" || tag === "CANVAS" || tag === "SVG" ||
            tag === "PICTURE" || tag === "IFRAME" || tag === "STYLE" || tag === "SCRIPT";
   }
+  // Contenitori attualmente protetti: servono a sweepHover() per rilasciare
+  // le protezioni rimaste "appese". La protezione veniva tolta SOLO dal
+  // mouseout: se il nodo sotto il cursore viene sostituito da un re-render
+  // (React), il mouseout non arriva mai e gli elementi restavano marcati
+  // __notteHovering PER SEMPRE - saltati da styleEl/resyncEl, quindi mai piu'
+  // ritematizzati (bug: card bianche "congelate" su App Store Connect,
+  // inline con il nostro color ma senza background-color).
+  var hoverRoots = [];
   function protectSubtree(root) {
     var nodes = [root].concat(Array.prototype.slice.call(root.querySelectorAll("*")));
     for (var i = 0; i < nodes.length; i++) {
@@ -445,6 +724,22 @@
       el.__notteHoverColor = el.style.getPropertyValue("color");
       el.style.setProperty("color", "#141414", "important");
       el.__notteHovering = true;
+    }
+    if (hoverRoots.indexOf(root) === -1) hoverRoots.push(root);
+  }
+  // Rilascia ogni protezione il cui contenitore non e' piu' sotto il mouse
+  // (o non e' piu' nel documento) e ritematizza subito quel sotto-albero,
+  // che potrebbe essersi perso dei cambi di colore mentre era protetto.
+  function sweepHover() {
+    for (var i = hoverRoots.length - 1; i >= 0; i--) {
+      var r = hoverRoots[i];
+      var stale = true;
+      try { stale = !r.isConnected || !r.matches(":hover"); } catch (e) { stale = true; }
+      if (stale) {
+        restoreSubtree(r);
+        hoverRoots.splice(i, 1);
+        if (r.isConnected && themed) walk(r);
+      }
     }
   }
   function restoreSubtree(root) {
@@ -466,6 +761,27 @@
   // non sull'elemento preciso sotto il cursore (es. lo <span> col nome): per
   // questo risaliamo qualche livello di antenati cercando chi ha lo sfondo
   // chiaro, e proteggiamo l'intero sotto-albero di quel contenitore.
+  // Un highlight di hover puo' anche essere disegnato da un ::before/::after
+  // (pseudo-elemento, invisibile al controllo sul backgroundColor
+  // dell'elemento): controlliamo anche quelli (bug: voce "Sign Out" del menu
+  // account di App Store Connect illeggibile al passaggio del mouse).
+  function pseudoLight(el, which) {
+    var pcs;
+    try { pcs = getComputedStyle(el, "::" + which); } catch (e) { return false; }
+    if (!pcs || pcs.content === "none") return false;
+    var c = parseColor(pcs.backgroundColor);
+    if (c && c.a >= 0.3 && luminance(c) >= 150) return true;
+    return gradientIsLight(pcs.backgroundImage);
+  }
+  // Sale di un livello ANCHE attraverso i confini degli shadow root: dentro
+  // uno shadow DOM parentElement del nodo piu' esterno e' null, ma l'albero
+  // continua nell'host. Senza questo, la risalita si fermava al bordo dello
+  // shadow root e lo sfondo chiaro (magari sull'host o piu' su) sfuggiva.
+  function upEl(el) {
+    if (el.parentElement) return el.parentElement;
+    var r = el.getRootNode ? el.getRootNode() : null;
+    return (r && r.host) ? r.host : null;
+  }
   function hoverProtect(target) {
     var el = target, depth = 0;
     while (el && el.nodeType === 1 && depth < 8) {
@@ -473,9 +789,10 @@
         var cs;
         try { cs = getComputedStyle(el); } catch (e) { cs = null; }
         var bg = cs ? parseColor(cs.backgroundColor) : null;
-        if (bg && bg.a >= 0.3 && luminance(bg) >= 150) protectSubtree(el);
+        if ((bg && bg.a >= 0.3 && luminance(bg) >= 150) ||
+            pseudoLight(el, "before") || pseudoLight(el, "after")) protectSubtree(el);
       }
-      el = el.parentElement;
+      el = upEl(el);
       depth++;
     }
   }
@@ -483,7 +800,7 @@
     var el = target, depth = 0;
     while (el && el.nodeType === 1 && depth < 8) {
       restoreSubtree(el);
-      el = el.parentElement;
+      el = upEl(el);
       depth++;
     }
   }
@@ -550,7 +867,16 @@
     } catch (e) {}
   }
 
-  if (window.top !== window.self) return; // solo frame principale
+  // NB: NIENTE guard "solo frame principale" (rimosso). Serviva al VECCHIO
+  // motore a inversione: il filtro del parent invertiva visivamente anche gli
+  // iframe, e l'istanza dentro l'iframe li re-invertiva (doppia inversione).
+  // Col motore a rimappatura ogni frame va tematizzato per conto suo,
+  // altrimenti gli iframe cross-origin restano bianchi (bug: form di login di
+  // App Store Connect, un iframe di idmsa.apple.com). Ogni frame ha la sua
+  // istanza del content script (all_frames:true nei manifest), col suo
+  // rilevatore pageAlreadyThemed e il suo observer. Nota: l'override per-sito
+  // dentro un iframe usa l'hostname del FRAME (es. idmsa.apple.com), non
+  // quello della pagina che lo contiene.
 
   if (document.readyState === "loading")
     document.addEventListener("DOMContentLoaded", loadAndRender, { once: true });
@@ -562,8 +888,116 @@
     api.storage.onChanged.addListener(function (ch, area) { if (area === "local") loadAndRender(); });
   }
 
+  /* ---------- Sentinella anti-regressione ----------
+   * Su una pagina che ABBIAMO scurito non deve esistere nessuno sfondo
+   * chiaro di grandi dimensioni: se ne compare uno, qualcosa ci e' sfuggito
+   * (race di framework, timing, API che non conosciamo - le web-app complesse
+   * ne inventano di continuo: capitato su ASC Analytics, card bianche una
+   * volta ogni tot cambi pagina). Invece di inseguire ogni singola causa,
+   * campioniamo una griglia di punti visibili: se troviamo uno sfondo chiaro
+   * non protetto da hover, facciamo ripartire una ripassata completa.
+   * Costo: ~30 getComputedStyle ogni 1.5s, zero in background. Se il chiaro
+   * non e' risolvibile (colore che non sappiamo parsare), backoff fino a 30s
+   * per non girare a vuoto. */
+  function sentinelCheck() {
+    if (!themed || document.hidden) return false;
+    var w = innerWidth, h = innerHeight;
+    if (!w || !h || !document.elementFromPoint) return false;
+    for (var i = 0; i < 30; i++) {
+      var x = (0.06 + 0.88 * ((i % 5) / 4)) * w;
+      var y = (0.06 + 0.88 * (Math.floor(i / 5) / 5)) * h;
+      var el = document.elementFromPoint(x, y), g = 0;
+      while (el && el.nodeType === 1 && g < 40) {
+        if (el.__notteHovering) break;      // zona protetta da hover: legittima
+        if (isSkipTag(el.tagName)) break;   // immagini/video/canvas: colori naturali
+        var cs2;
+        try { cs2 = getComputedStyle(el); } catch (e) { break; }
+        // Anche un gradiente chiaro sfuggito conta come "sporco" (i gradienti
+        // con url() invece sono immagini vere e restano com'e' - il backoff
+        // evita di girare a vuoto se non possiamo sistemarlo).
+        if (cs2.backgroundImage && cs2.backgroundImage.indexOf("url(") === -1 &&
+            gradientIsLight(cs2.backgroundImage)) { scheduleRetheme(); return true; }
+        var c = parseColor(cs2.backgroundColor);
+        if (c && c.a > 0.2) {
+          if (luminance(c) >= 150) { scheduleRetheme(); return true; }
+          break;
+        }
+        el = el.parentElement;
+        g++;
+      }
+    }
+    return false;
+  }
+  // Controllo sentinella anticipato dopo raffiche di nodi nuovi (SPA che
+  // cambia pagina): senza, il bianco poteva restare visibile fino al
+  // prossimo giro da 1.5s. Debounced per non campionare a ogni mutazione.
+  var sentinelSoonTimer = null;
+  function sentinelSoon() {
+    if (sentinelSoonTimer) clearTimeout(sentinelSoonTimer);
+    sentinelSoonTimer = setTimeout(function () {
+      sentinelSoonTimer = null;
+      try { sentinelCheck(); } catch (e) {}
+    }, 350);
+  }
+
+  var sentinelDelay = 1500;
+  function sentinelLoop() {
+    var dirty = false;
+    try { dirty = sentinelCheck(); } catch (e) {}
+    sentinelDelay = dirty ? Math.min(sentinelDelay * 2, 30000) : 1500;
+    setTimeout(sentinelLoop, sentinelDelay);
+  }
+  setTimeout(sentinelLoop, 1500);
+
   // Vedi hoverProtect(): protegge il testo quando il mouse attiva uno sfondo
   // chiaro via :hover puro CSS, che altrimenti sfuggirebbe del tutto.
-  document.addEventListener("mouseover", function (e) { if (themed) hoverProtect(e.target); }, true);
-  document.addEventListener("mouseout", function (e) { if (themed) hoverRestore(e.target); }, true);
+  // Dentro uno shadow DOM l'evento che arriva al document viene RITARGHETTATO
+  // sull'host: e.target NON e' l'elemento vero sotto il mouse ma il contenitore
+  // dello shadow root, e il controllo dello sfondo chiaro falliva sempre (bug:
+  // hover del menu account di App Store Connect - che vive in shadow DOM -
+  // testo illeggibile). composedPath()[0] restituisce il bersaglio reale anche
+  // dentro gli shadow root (aperti; shadow-patch.js li forza tutti aperti).
+  function hoverTarget(e) {
+    try {
+      if (e.composedPath) { var p = e.composedPath(); if (p && p.length) return p[0]; }
+    } catch (err) {}
+    return e.target;
+  }
+  function onHoverOver(e) {
+    if (!themed) return;
+    sweepHover(); // rilascia le protezioni rimaste appese (vedi sweepHover)
+    var t = hoverTarget(e);
+    hoverProtect(t);
+    // Doppia rete di sicurezza sui tempi: (1) Safari puo' consegnare il
+    // mouseover PRIMA di aver applicato gli stili :hover; (2) molti siti
+    // animano lo sfondo dell'hover con una transition, per cui al primo
+    // controllo il colore e' ancora scuro e diventa chiaro solo dopo.
+    // Ricontrolliamo quindi piu' volte, solo finche' il mouse e' ancora li'.
+    var again = function () {
+      try { if (themed && t.matches && t.matches(":hover")) hoverProtect(t); } catch (err) {}
+    };
+    setTimeout(again, 0);
+    setTimeout(again, 150);
+    setTimeout(again, 400);
+  }
+  function onHoverOut(e) {
+    if (!themed) return;
+    hoverRestore(hoverTarget(e));
+    // Doppio controllo asincrono: dopo il mouseout gli stati :hover sono gia'
+    // aggiornati, quindi lo sweep libera anche contenitori non sulla catena
+    // del target (es. il menu appena chiuso).
+    setTimeout(sweepHover, 0);
+  }
+  // Attaccati al document E a ogni shadow root (vedi registerShadowRoot: i
+  // movimenti del mouse TRA elementi dentro uno shadow root non raggiungono
+  // mai i listener sul document per via del retargeting sull'host).
+  function attachHoverListeners(root) {
+    root.addEventListener("mouseover", onHoverOver, true);
+    root.addEventListener("mouseout", onHoverOut, true);
+  }
+  attachHoverListeners(document);
+  // Se il mouse esce dalla pagina o la finestra perde il focus non arriva
+  // nessun mouseover successivo: rilasciamo tutto esplicitamente.
+  document.addEventListener("mouseleave", function () { if (themed) sweepHover(); }, true);
+  window.addEventListener("blur", function () { if (themed) sweepHover(); });
 })();

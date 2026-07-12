@@ -33,4 +33,47 @@
     } catch (e) {}
     return root;
   };
+
+  /* Hook sulle modifiche CSSOM (insertRule & co.), sempre in MAIN world.
+   *
+   * Perche': styled-components e simili in produzione aggiungono le regole
+   * CSS con sheet.insertRule(), che NON produce nessuna mutazione DOM. Se una
+   * regola arriva DOPO l'ultima passata del motore (es. il modulo dei grafici
+   * caricato in ritardo su App Store Connect), gli elementi gia' processati
+   * restano coi colori vecchi e nessun MutationObserver se ne accorge (bug
+   * verificato dal vivo: card bianche in Analytics, computed background
+   * oklch chiaro ma nessun background-color inline nostro; bastava un
+   * setAttribute qualsiasi per farle scurire -> mancava solo il "trigger").
+   * Qui avvisiamo content.js con un CustomEvent, throttled per non
+   * bombardarlo durante il boot (styled-components fa centinaia di
+   * insertRule di fila).
+   */
+  var cssNotifyPending = false;
+  function notifyCssChanged() {
+    if (cssNotifyPending) return;
+    cssNotifyPending = true;
+    setTimeout(function () {
+      cssNotifyPending = false;
+      try {
+        document.dispatchEvent(new CustomEvent("__notte_css_changed__", { bubbles: true }));
+      } catch (e) {}
+    }, 50);
+  }
+  function wrap(proto, name) {
+    var fn = proto && proto[name];
+    if (typeof fn !== "function") return;
+    proto[name] = function () {
+      var r = fn.apply(this, arguments);
+      notifyCssChanged();
+      return r;
+    };
+  }
+  if (typeof CSSStyleSheet !== "undefined" && CSSStyleSheet.prototype) {
+    wrap(CSSStyleSheet.prototype, "insertRule");
+    wrap(CSSStyleSheet.prototype, "deleteRule");
+    wrap(CSSStyleSheet.prototype, "addRule");    // legacy
+    wrap(CSSStyleSheet.prototype, "removeRule"); // legacy
+    wrap(CSSStyleSheet.prototype, "replace");    // constructable stylesheets
+    wrap(CSSStyleSheet.prototype, "replaceSync");
+  }
 })();
