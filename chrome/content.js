@@ -512,25 +512,40 @@
     var cs;
     try { cs = getComputedStyle(el); } catch (e) { return; }
 
-    applyColor(el, "background-color", "bg", cs.backgroundColor);
-    applyColor(el, "color", "fg", cs.color);
-    // Bordi LATO PER LATO, non col solo borderTop come prima: un divisore
-    // fatto con solo border-bottom, o un triangolino/caret CSS (width:0 +
-    // border-bottom colorato e lati trasparenti, es. la freccetta del menu
-    // account di App Store Connect) hanno borderTopWidth=0 e restavano
-    // chiari. I lati trasparenti vengono saltati da applyColor (alpha ~0),
-    // quindi i triangoli restano triangoli.
-    if (parseFloat(cs.borderTopWidth) > 0) applyColor(el, "border-top-color", "br", cs.borderTopColor);
-    if (parseFloat(cs.borderRightWidth) > 0) applyColor(el, "border-right-color", "br", cs.borderRightColor);
-    if (parseFloat(cs.borderBottomWidth) > 0) applyColor(el, "border-bottom-color", "br", cs.borderBottomColor);
-    if (parseFloat(cs.borderLeftWidth) > 0) applyColor(el, "border-left-color", "br", cs.borderLeftColor);
-    applyBgImage(el, cs);
-    applyPseudo(el);
-    el[MARK] = 1;
-    // Firma dello stile inline dopo la nostra scrittura: serve all'observer
-    // per riconoscere "questa mutazione l'ho appena fatta io" ed evitare di
-    // rincorrere all'infinito le proprie stesse modifiche (vedi observer).
-    el[STYLE_SIG] = el.getAttribute("style");
+    // TUTTO il resto della funzione e' avvolto in un try/catch: un elemento
+    // "strano" (un valore CSS in un formato che parseColor non riconosce, o
+    // qualunque altra eccezione imprevista - es. proprieta' Fluent UI di
+    // Outlook Web servite in modo leggermente diverso da Firefox) non deve
+    // interrompere l'elaborazione di TUTTI gli elementi successivi nello
+    // stesso giro. Senza questo, un solo elemento che fa esplodere il codice
+    // qui dentro fermava per sempre il resto del blocco in walk() (vedi piu'
+    // sotto): peggio ancora, dato che l'observer e il controllo periodico
+    // richiamano la stessa identica funzione, il tentativo di auto-ripararsi
+    // falliva sempre nello stesso punto, lasciando quella porzione di pagina
+    // permanentemente non scurita finche' non si ricaricava manualmente
+    // (bug segnalato: riquadro di risposta email di Outlook Web rimasto
+    // bianco per ore, tornato normale solo dopo un refresh).
+    try {
+      applyColor(el, "background-color", "bg", cs.backgroundColor);
+      applyColor(el, "color", "fg", cs.color);
+      // Bordi LATO PER LATO, non col solo borderTop come prima: un divisore
+      // fatto con solo border-bottom, o un triangolino/caret CSS (width:0 +
+      // border-bottom colorato e lati trasparenti, es. la freccetta del menu
+      // account di App Store Connect) hanno borderTopWidth=0 e restavano
+      // chiari. I lati trasparenti vengono saltati da applyColor (alpha ~0),
+      // quindi i triangoli restano triangoli.
+      if (parseFloat(cs.borderTopWidth) > 0) applyColor(el, "border-top-color", "br", cs.borderTopColor);
+      if (parseFloat(cs.borderRightWidth) > 0) applyColor(el, "border-right-color", "br", cs.borderRightColor);
+      if (parseFloat(cs.borderBottomWidth) > 0) applyColor(el, "border-bottom-color", "br", cs.borderBottomColor);
+      if (parseFloat(cs.borderLeftWidth) > 0) applyColor(el, "border-left-color", "br", cs.borderLeftColor);
+      applyBgImage(el, cs);
+      applyPseudo(el);
+      el[MARK] = 1;
+      // Firma dello stile inline dopo la nostra scrittura: serve all'observer
+      // per riconoscere "questa mutazione l'ho appena fatta io" ed evitare di
+      // rincorrere all'infinito le proprie stesse modifiche (vedi observer).
+      el[STYLE_SIG] = el.getAttribute("style");
+    } catch (e) {}
   }
 
   // Rilegge il colore VERO di un elemento ignorando il nostro stesso override:
@@ -548,24 +563,29 @@
         tag === "PICTURE" || tag === "IFRAME" || tag === "STYLE" ||
         tag === "SCRIPT" || el.id === BASE_ID) { return; }
     if (el.__notteHovering) return; // non toccare un elemento protetto da hoverProtect()
-    el.style.removeProperty("background-color");
-    el.style.removeProperty("color");
-    el.style.removeProperty("border-top-color");
-    el.style.removeProperty("border-right-color");
-    el.style.removeProperty("border-bottom-color");
-    el.style.removeProperty("border-left-color");
-    // background-image: rimuoverlo SOLO se l'abbiamo messo noi. Un sito puo'
-    // avere un background-image inline suo (es. avatar via url(...)): se lo
-    // togliessimo qui, styleEl non lo ripristinerebbe mai (noi non salviamo
-    // i valori originali del sito).
-    if (el["__notte_background-image"] !== undefined) {
-      el.style.removeProperty("background-image");
-      el["__notte_background-image"] = undefined;
-    }
-    // Pseudo-elementi: togliamo i marchi cosi' styleEl() rivaluta da zero
-    // il vero colore sottostante (il sito potrebbe aver cambiato lo stato).
-    clearPseudoMarks(el);
-    styleEl(el);
+    // Stesso principio di styleEl(): un errore isolato qui non deve impedire
+    // di risincronizzare gli altri elementi del sotto-albero (vedi
+    // resyncSubtree) o proseguire il resto del giro.
+    try {
+      el.style.removeProperty("background-color");
+      el.style.removeProperty("color");
+      el.style.removeProperty("border-top-color");
+      el.style.removeProperty("border-right-color");
+      el.style.removeProperty("border-bottom-color");
+      el.style.removeProperty("border-left-color");
+      // background-image: rimuoverlo SOLO se l'abbiamo messo noi. Un sito puo'
+      // avere un background-image inline suo (es. avatar via url(...)): se lo
+      // togliessimo qui, styleEl non lo ripristinerebbe mai (noi non salviamo
+      // i valori originali del sito).
+      if (el["__notte_background-image"] !== undefined) {
+        el.style.removeProperty("background-image");
+        el["__notte_background-image"] = undefined;
+      }
+      // Pseudo-elementi: togliamo i marchi cosi' styleEl() rivaluta da zero
+      // il vero colore sottostante (il sito potrebbe aver cambiato lo stato).
+      clearPseudoMarks(el);
+      styleEl(el);
+    } catch (e) {}
   }
 
   // Alcuni cambi di stato (es. classe "is-selected" su una riga di webmail
@@ -585,7 +605,8 @@
   function resyncSubtree(el) {
     resyncEl(el);
     if (!el.querySelectorAll) return;
-    var list = el.querySelectorAll("*");
+    var list;
+    try { list = el.querySelectorAll("*"); } catch (e) { return; }
     for (var i = 0; i < list.length; i++) resyncEl(list[i]);
   }
 
@@ -600,14 +621,19 @@
     function chunk() {
       var end = Math.min(i + 400, list.length);
       for (; i < end; i++) {
-        styleEl(list[i]);
-        if (list[i].shadowRoot) {
-          // Scende negli shadow root aperti; registra anche quelli non
-          // annunciati da shadow-patch (rete di sicurezza: listener hover,
-          // observer e base CSS servono in OGNI root).
-          registerShadowRoot(list[i].shadowRoot);
-          walk(list[i].shadowRoot);
-        }
+        // Difesa in profondita': styleEl() gia' contiene i propri errori, ma
+        // registerShadowRoot/walk ricorsivo no - un try/catch qui assicura
+        // che nessun elemento del blocco possa mai fermare quelli dopo di lui.
+        try {
+          styleEl(list[i]);
+          if (list[i].shadowRoot) {
+            // Scende negli shadow root aperti; registra anche quelli non
+            // annunciati da shadow-patch (rete di sicurezza: listener hover,
+            // observer e base CSS servono in OGNI root).
+            registerShadowRoot(list[i].shadowRoot);
+            walk(list[i].shadowRoot);
+          }
+        } catch (e) {}
       }
       if (i < list.length) window.setTimeout(chunk, 0);
     }
@@ -631,45 +657,51 @@
     if (observer) return;
     observer = new MutationObserver(function (muts) {
       for (var i = 0; i < muts.length; i++) {
-        var m = muts[i];
-        if (m.type === "attributes") {
-          var an = m.attributeName || "";
-          // Le NOSTRE marcature pseudo-elemento non devono rincorrersi da sole.
-          if (an.indexOf("data-notte-") === 0) continue;
-          var el = m.target;
-          if (an === "style") {
-            // Confrontiamo con la firma dell'ultima scrittura NOSTRA: se
-            // combacia e' solo l'eco della nostra stessa modifica (altrimenti
-            // loop infinito) - se e' diversa, e' stato il sito a toccarlo.
-            if (el.getAttribute("style") !== el[STYLE_SIG]) resyncEl(el);
+        // Un try/catch per ogni singola mutazione: se una in particolare
+        // provoca un errore (es. durante resyncSubtree su un sotto-albero
+        // con un elemento "strano"), le mutazioni successive nello STESSO
+        // batch non devono essere perse - stessa logica di styleEl/walk.
+        try {
+          var m = muts[i];
+          if (m.type === "attributes") {
+            var an = m.attributeName || "";
+            // Le NOSTRE marcature pseudo-elemento non devono rincorrersi da sole.
+            if (an.indexOf("data-notte-") === 0) continue;
+            var el = m.target;
+            if (an === "style") {
+              // Confrontiamo con la firma dell'ultima scrittura NOSTRA: se
+              // combacia e' solo l'eco della nostra stessa modifica (altrimenti
+              // loop infinito) - se e' diversa, e' stato il sito a toccarlo.
+              if (el.getAttribute("style") !== el[STYLE_SIG]) resyncEl(el);
+            } else {
+              // class, data-hovered/data-selected/aria-*: qualunque attributo
+              // puo' cambiare lo stato visivo via CSS, e la regola del sito
+              // e' spesso del tipo ".selected .child{...}" - risincronizziamo
+              // l'intero sotto-albero (vedi resyncSubtree), non solo
+              // l'elemento mutato, altrimenti i discendenti restano congelati
+              // al colore di prima.
+              resyncSubtree(el);
+            }
           } else {
-            // class, data-hovered/data-selected/aria-*: qualunque attributo
-            // puo' cambiare lo stato visivo via CSS, e la regola del sito
-            // e' spesso del tipo ".selected .child{...}" - risincronizziamo
-            // l'intero sotto-albero (vedi resyncSubtree), non solo
-            // l'elemento mutato, altrimenti i discendenti restano congelati
-            // al colore di prima.
-            resyncSubtree(el);
-          }
-        } else {
-          var nodes = m.addedNodes;
-          if (nodes.length) sentinelSoon(); // vedi sentinelSoon: SPA nav
-          for (var j = 0; j < nodes.length; j++) {
-            var n = nodes[j];
-            walk(n);
-            // Un <style> o <link rel="stylesheet"> aggiunto cambia i colori
-            // anche di elementi GIA' processati: il walk del solo nodo
-            // aggiunto non basta, serve una ripassata completa (per i <link>
-            // anche al load, quando le regole sono davvero attive).
-            if (n.nodeType === 1) {
-              if (n.tagName === "STYLE" && n.id !== BASE_ID) scheduleRetheme();
-              else if (n.tagName === "LINK" && /stylesheet/i.test(n.rel || "")) {
-                scheduleRetheme();
-                n.addEventListener("load", scheduleRetheme);
+            var nodes = m.addedNodes;
+            if (nodes.length) sentinelSoon(); // vedi sentinelSoon: SPA nav
+            for (var j = 0; j < nodes.length; j++) {
+              var n = nodes[j];
+              walk(n);
+              // Un <style> o <link rel="stylesheet"> aggiunto cambia i colori
+              // anche di elementi GIA' processati: il walk del solo nodo
+              // aggiunto non basta, serve una ripassata completa (per i <link>
+              // anche al load, quando le regole sono davvero attive).
+              if (n.nodeType === 1) {
+                if (n.tagName === "STYLE" && n.id !== BASE_ID) scheduleRetheme();
+                else if (n.tagName === "LINK" && /stylesheet/i.test(n.rel || "")) {
+                  scheduleRetheme();
+                  n.addEventListener("load", scheduleRetheme);
+                }
               }
             }
           }
-        }
+        } catch (e) {}
       }
     });
     try { observer.observe(document.documentElement, OBSERVE_OPTS); } catch (e) {}
@@ -698,21 +730,23 @@
       for (var r = 0; r < roots.length; r++) {
         var done = roots[r].querySelectorAll ? roots[r].querySelectorAll("*") : [];
         for (var i = 0; i < done.length; i++) {
-          var el = done[i];
-          if (el[MARK]) {
-            el.style.removeProperty("background-color");
-            el.style.removeProperty("color");
-            el.style.removeProperty("border-top-color");
-            el.style.removeProperty("border-right-color");
-            el.style.removeProperty("border-bottom-color");
-            el.style.removeProperty("border-left-color");
-            if (el["__notte_background-image"] !== undefined) {
-              el.style.removeProperty("background-image");
-              el["__notte_background-image"] = undefined;
+          try {
+            var el = done[i];
+            if (el[MARK]) {
+              el.style.removeProperty("background-color");
+              el.style.removeProperty("color");
+              el.style.removeProperty("border-top-color");
+              el.style.removeProperty("border-right-color");
+              el.style.removeProperty("border-bottom-color");
+              el.style.removeProperty("border-left-color");
+              if (el["__notte_background-image"] !== undefined) {
+                el.style.removeProperty("background-image");
+                el["__notte_background-image"] = undefined;
+              }
+              clearPseudoMarks(el);
+              el[MARK] = 0;
             }
-            clearPseudoMarks(el);
-            el[MARK] = 0;
-          }
+          } catch (e) {}
         }
       }
     }
@@ -742,11 +776,13 @@
   function protectSubtree(root) {
     var nodes = [root].concat(Array.prototype.slice.call(root.querySelectorAll("*")));
     for (var i = 0; i < nodes.length; i++) {
-      var el = nodes[i];
-      if (isSkipTag(el.tagName) || el.__notteHovering) continue;
-      el.__notteHoverColor = el.style.getPropertyValue("color");
-      el.style.setProperty("color", "#141414", "important");
-      el.__notteHovering = true;
+      try {
+        var el = nodes[i];
+        if (isSkipTag(el.tagName) || el.__notteHovering) continue;
+        el.__notteHoverColor = el.style.getPropertyValue("color");
+        el.style.setProperty("color", "#141414", "important");
+        el.__notteHovering = true;
+      } catch (e) {}
     }
     if (hoverRoots.indexOf(root) === -1) hoverRoots.push(root);
   }
@@ -768,16 +804,18 @@
   function restoreSubtree(root) {
     var nodes = [root].concat(Array.prototype.slice.call(root.querySelectorAll("*")));
     for (var i = 0; i < nodes.length; i++) {
-      var el = nodes[i];
-      if (!el.__notteHovering) continue;
-      el.__notteHovering = false;
-      if (el.__notteHoverColor) el.style.setProperty("color", el.__notteHoverColor, "important");
-      else el.style.removeProperty("color");
-      el.__notteHoverColor = undefined;
-      // Riallinea la firma anti-eco: altrimenti l'observer vedrebbe questa
-      // nostra stessa scrittura come un cambiamento "esterno" e la
-      // rincorrerebbe inutilmente con resyncEl().
-      el[STYLE_SIG] = el.getAttribute("style");
+      try {
+        var el = nodes[i];
+        if (!el.__notteHovering) continue;
+        el.__notteHovering = false;
+        if (el.__notteHoverColor) el.style.setProperty("color", el.__notteHoverColor, "important");
+        else el.style.removeProperty("color");
+        el.__notteHoverColor = undefined;
+        // Riallinea la firma anti-eco: altrimenti l'observer vedrebbe questa
+        // nostra stessa scrittura come un cambiamento "esterno" e la
+        // rincorrerebbe inutilmente con resyncEl().
+        el[STYLE_SIG] = el.getAttribute("style");
+      } catch (e) {}
     }
   }
   // Lo sfondo chiaro dell'hover spesso e' su un CONTENITORE (es. la riga),
