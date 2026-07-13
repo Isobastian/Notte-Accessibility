@@ -568,6 +568,27 @@
     styleEl(el);
   }
 
+  // Alcuni cambi di stato (es. classe "is-selected" su una riga di webmail
+  // quando la selezioni/deselezioni) non toccano SOLO l'elemento il cui
+  // attributo e' mutato: la regola CSS del sito e' spesso del tipo
+  // ".selected .child{...}", quindi anche i DISCENDENTI cambiano colore pur
+  // non avendo subito loro stessi alcuna mutazione. Il problema e' che quei
+  // discendenti hanno gia' un nostro inline style "!important": il loro
+  // getComputedStyle continua percio' a riflettere il VECCHIO valore che
+  // avevamo forzato, non quello vero sotto la nuova classe, finche' qualcuno
+  // non lo rilegge da capo. Risincronizzando solo l'elemento mutato (come
+  // faceva prima resyncEl da solo) i figli restavano "congelati" al colore
+  // di prima della (de)selezione fino al reload della pagina (bug segnalato:
+  // riga di una webmail che non torna al colore normale dopo la
+  // deselezione). Qui ripassiamo l'intero sotto-albero dell'elemento
+  // mutato, non solo lui.
+  function resyncSubtree(el) {
+    resyncEl(el);
+    if (!el.querySelectorAll) return;
+    var list = el.querySelectorAll("*");
+    for (var i = 0; i < list.length; i++) resyncEl(list[i]);
+  }
+
   function walk(root) {
     if (!root) return;
     if (root.nodeType === 1) styleEl(root);
@@ -623,10 +644,12 @@
             if (el.getAttribute("style") !== el[STYLE_SIG]) resyncEl(el);
           } else {
             // class, data-hovered/data-selected/aria-*: qualunque attributo
-            // puo' cambiare lo stato visivo via CSS. Il nostro inline
-            // vincerebbe comunque su getComputedStyle, quindi serve
-            // resyncEl() per leggere il vero colore sottostante.
-            resyncEl(el);
+            // puo' cambiare lo stato visivo via CSS, e la regola del sito
+            // e' spesso del tipo ".selected .child{...}" - risincronizziamo
+            // l'intero sotto-albero (vedi resyncSubtree), non solo
+            // l'elemento mutato, altrimenti i discendenti restano congelati
+            // al colore di prima.
+            resyncSubtree(el);
           }
         } else {
           var nodes = m.addedNodes;
