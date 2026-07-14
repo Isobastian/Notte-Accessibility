@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Notte — Dark Mode",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Darkens overly bright websites while keeping contrast high. Toggle per site. Free, for the low-vision community.",
   "icons": {
     "48": "images/icon-48.png",

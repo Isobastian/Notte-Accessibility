@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Notte — Dark Mode",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Scurisce i siti troppo chiari mantenendo alto il contrasto. Attiva/disattiva per sito. Gratuita, per ipovedenti.",
   "icons": {
     "48": "images/icon-48.png",
