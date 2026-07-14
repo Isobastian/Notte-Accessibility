@@ -19,6 +19,34 @@
   // L'unica eccezione per-sito e' `overrides`.
   var DEFAULTS = { overrides: {} };
 
+  /* ---------- Salvagente prestazioni (circuit breaker) ----------
+   * Su pagine enormi e iper-dinamiche (es. Gmail) il lavoro di tematizzazione
+   * puo' saturare il thread principale al punto che Chrome blocca la scheda
+   * ("Pagina non risponde"). Misuriamo quanto tempo Notte passa nei suoi cicli
+   * pesanti (walk/resync) dentro una finestra scorrevole: se supera una soglia
+   * alta (sta monopolizzando il thread), stacchiamo observer e ricicli e
+   * lasciamo la pagina reattiva. Sui siti normali non scatta mai. */
+  var bailed = false;
+  var perfNow = (window.performance && performance.now)
+    ? function () { return performance.now(); }
+    : function () { return Date.now(); };
+  var winStart = 0, winBusy = 0;
+  var WIN_MS = 2000;      // ampiezza della finestra di misura
+  var WIN_BUDGET = 1400;  // ms di thread nella finestra oltre i quali molliamo (~70%)
+  function noteBusy(t0) {
+    var now = perfNow();
+    if (now - winStart > WIN_MS) { winStart = now; winBusy = 0; }
+    winBusy += now - t0;
+    if (!bailed && winBusy > WIN_BUDGET) tripBreaker();
+  }
+  function tripBreaker() {
+    bailed = true;
+    try { stopObserver(); } catch (e) {}
+    // Niente altro lavoro: lo stile gia' applicato resta com'e' (rimuoverlo
+    // sarebbe altro lavoro pesante). Su pagine cosi' conviene il dark mode
+    // nativo del sito o l'interruttore per-sito.
+  }
+
   /* ---------- Shadow DOM ----------
    * Molti siti moderni (es. App Store Connect) incapsulano parti dell'interfaccia
    * in shadow DOM. querySelectorAll sul documento NON vede dentro gli shadow
@@ -71,7 +99,7 @@
   // Garantiamo una passata entro ~500ms dal primo avviso, sempre.
   var cssRethemeTimer = null, cssRethemeFirst = 0;
   function scheduleRetheme() {
-    if (!themed) return;
+    if (!themed || bailed) return;
     var now = Date.now();
     if (!cssRethemeTimer) cssRethemeFirst = now;
     else clearTimeout(cssRethemeTimer);
@@ -607,7 +635,21 @@
     if (!el.querySelectorAll) return;
     var list;
     try { list = el.querySelectorAll("*"); } catch (e) { return; }
-    for (var i = 0; i < list.length; i++) resyncEl(list[i]);
+    // A blocchi come walk(): un cambio di classe su un contenitore gigante
+    // (es. Gmail) prima risincronizzava l'INTERO sotto-albero in un colpo
+    // solo, bloccando il frame abbastanza a lungo da far scattare il "Pagina
+    // non risponde" di Chrome. Ora cediamo il controllo al browser ogni 400
+    // elementi e teniamo conto del tempo speso (vedi noteBusy/circuit breaker).
+    var i = 0;
+    function rchunk() {
+      if (bailed) return;
+      var t0 = perfNow();
+      var end = Math.min(i + 400, list.length);
+      for (; i < end; i++) resyncEl(list[i]);
+      noteBusy(t0);
+      if (i < list.length) window.setTimeout(rchunk, 0);
+    }
+    rchunk();
   }
 
   function walk(root) {
@@ -619,6 +661,8 @@
     // A blocchi, per non bloccare la pagina su DOM enormi.
     var i = 0;
     function chunk() {
+      if (bailed) return;
+      var t0 = perfNow();
       var end = Math.min(i + 400, list.length);
       for (; i < end; i++) {
         // Difesa in profondita': styleEl() gia' contiene i propri errori, ma
@@ -635,6 +679,7 @@
           }
         } catch (e) {}
       }
+      noteBusy(t0);
       if (i < list.length) window.setTimeout(chunk, 0);
     }
     chunk();
@@ -667,7 +712,7 @@
   var pendSub = null, pendEl = null, flushScheduled = false;
   function ensurePending() { if (!pendSub) { pendSub = new Set(); pendEl = new Set(); } }
   function scheduleFlush() {
-    if (flushScheduled) return;
+    if (flushScheduled || bailed) return;
     flushScheduled = true;
     var raf = window.requestAnimationFrame || function (f) { return window.setTimeout(f, 16); };
     raf(flushResync);
@@ -685,7 +730,7 @@
   }
   function flushResync() {
     flushScheduled = false;
-    if (!pendSub) return;
+    if (bailed || !pendSub) return;
     var subs = pendSub, els = pendEl;
     pendSub = null; pendEl = null;
     subs.forEach(function (el) {
@@ -759,6 +804,7 @@
     // applyTheme() anche a 200/700/1600ms: vogliamo che ogni chiamata
     // ri-percorra il DOM per recuperare eventuali stili resettati dal sito
     // (vedi applyColor: e' economico, non fa nulla se non e' cambiato nulla).
+    if (bailed) return;
     themed = true;
     ensureBase();
     for (var s = 0; s < shadowRoots.length; s++) ensureBase(shadowRoots[s]);
@@ -1072,6 +1118,7 @@
 
   var sentinelDelay = 1500;
   function sentinelLoop() {
+    if (bailed) return;
     try { pruneShadowRoots(); } catch (e) {}
     var dirty = false;
     try { dirty = sentinelCheck(); } catch (e) {}
@@ -1095,7 +1142,7 @@
     return e.target;
   }
   function onHoverOver(e) {
-    if (!themed) return;
+    if (!themed || bailed) return;
     sweepHover(); // rilascia le protezioni rimaste appese (vedi sweepHover)
     var t = hoverTarget(e);
     hoverProtect(t);
@@ -1112,7 +1159,7 @@
     setTimeout(again, 400);
   }
   function onHoverOut(e) {
-    if (!themed) return;
+    if (!themed || bailed) return;
     hoverRestore(hoverTarget(e));
     // Doppio controllo asincrono: dopo il mouseout gli stati :hover sono gia'
     // aggiornati, quindi lo sweep libera anche contenitori non sulla catena
