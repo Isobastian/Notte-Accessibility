@@ -653,14 +653,56 @@
     if (!observer) return;
     try { observer.observe(root, OBSERVE_OPTS); } catch (e) {}
   }
+  // Le mutazioni di ATTRIBUTI vengono accumulate e processate una volta per
+  // frame (requestAnimationFrame), deduplicando i bersagli. Prima ogni singola
+  // mutazione faceva ripartire SUBITO un resyncSubtree sincrono dell'intero
+  // sotto-albero: i siti complessi cambiano classi/attributi molte volte al
+  // secondo sugli stessi contenitori, e col crescere del DOM di una SPA quel
+  // costo cresceva senza sosta -> rallentamento progressivo (segnalato su
+  // Chrome: scheda fluida all'inizio, sempre piu' lenta col passare del tempo).
+  // Ora una raffica collassa in una sola passata e, se in coda ci sono sia un
+  // antenato sia un suo discendente, si risincronizza solo l'antenato (che
+  // copre gia' il discendente). Il comportamento visibile non cambia: il
+  // resync avviene comunque, solo raggruppato entro il frame successivo.
+  var pendSub = null, pendEl = null, flushScheduled = false;
+  function ensurePending() { if (!pendSub) { pendSub = new Set(); pendEl = new Set(); } }
+  function scheduleFlush() {
+    if (flushScheduled) return;
+    flushScheduled = true;
+    var raf = window.requestAnimationFrame || function (f) { return window.setTimeout(f, 16); };
+    raf(flushResync);
+  }
+  // true se un ANTENATO dell'elemento e' anch'esso in coda per un
+  // resyncSubtree: in tal caso quel resync lo copre gia' e questo e' inutile
+  // (sale anche attraverso i confini shadow via .host).
+  function ancestorInSet(el, set) {
+    var p = el.parentNode;
+    while (p) {
+      if (set.has(p)) return true;
+      p = p.parentNode || p.host || null;
+    }
+    return false;
+  }
+  function flushResync() {
+    flushScheduled = false;
+    if (!pendSub) return;
+    var subs = pendSub, els = pendEl;
+    pendSub = null; pendEl = null;
+    subs.forEach(function (el) {
+      try { if (el.isConnected && !ancestorInSet(el, subs)) resyncSubtree(el); } catch (e) {}
+    });
+    els.forEach(function (el) {
+      // gia' coperto se lui stesso o un antenato e' in un resyncSubtree in coda
+      try { if (el.isConnected && !subs.has(el) && !ancestorInSet(el, subs)) resyncEl(el); } catch (e) {}
+    });
+  }
   function startObserver() {
     if (observer) return;
     observer = new MutationObserver(function (muts) {
       for (var i = 0; i < muts.length; i++) {
         // Un try/catch per ogni singola mutazione: se una in particolare
-        // provoca un errore (es. durante resyncSubtree su un sotto-albero
-        // con un elemento "strano"), le mutazioni successive nello STESSO
-        // batch non devono essere perse - stessa logica di styleEl/walk.
+        // provoca un errore, le mutazioni successive nello STESSO batch non
+        // devono essere perse - stessa logica di styleEl/walk.
         try {
           var m = muts[i];
           if (m.type === "attributes") {
@@ -668,19 +710,21 @@
             // Le NOSTRE marcature pseudo-elemento non devono rincorrersi da sole.
             if (an.indexOf("data-notte-") === 0) continue;
             var el = m.target;
+            ensurePending();
             if (an === "style") {
               // Confrontiamo con la firma dell'ultima scrittura NOSTRA: se
               // combacia e' solo l'eco della nostra stessa modifica (altrimenti
               // loop infinito) - se e' diversa, e' stato il sito a toccarlo.
-              if (el.getAttribute("style") !== el[STYLE_SIG]) resyncEl(el);
+              // Accodiamo un resync del solo elemento.
+              if (el.getAttribute("style") !== el[STYLE_SIG]) { pendEl.add(el); scheduleFlush(); }
             } else {
               // class, data-hovered/data-selected/aria-*: qualunque attributo
               // puo' cambiare lo stato visivo via CSS, e la regola del sito
-              // e' spesso del tipo ".selected .child{...}" - risincronizziamo
-              // l'intero sotto-albero (vedi resyncSubtree), non solo
+              // e' spesso del tipo ".selected .child{...}" - accodiamo un
+              // resync dell'intero sotto-albero (vedi resyncSubtree), non solo
               // l'elemento mutato, altrimenti i discendenti restano congelati
               // al colore di prima.
-              resyncSubtree(el);
+              pendSub.add(el); scheduleFlush();
             }
           } else {
             var nodes = m.addedNodes;
@@ -1001,8 +1045,34 @@
     }, 350);
   }
 
+  // Gli shadow root vengono registrati una volta e mai piu' rimossi. Su una
+  // SPA che crea e distrugge di continuo componenti con shadow DOM, l'array
+  // `shadowRoots` cresceva all'infinito: ogni entry tiene in vita il proprio
+  // sotto-albero (niente garbage collection) e resta osservata dal
+  // MutationObserver, che li tiene ancorati -> memoria e lavoro che salgono col
+  // tempo su schede tenute aperte a lungo (uno dei motivi del rallentamento
+  // progressivo su Chrome). Qui, periodicamente, scartiamo i root il cui host
+  // e' uscito dal DOM. Se ne abbiamo tolto qualcuno, ri-agganciamo l'observer
+  // ai soli root ancora vivi (disconnect() e' l'unico modo di smettere di
+  // osservare i detached e liberarli davvero).
+  function pruneShadowRoots() {
+    var removed = false;
+    for (var i = shadowRoots.length - 1; i >= 0; i--) {
+      var sr = shadowRoots[i], shHost = sr && sr.host;
+      if (!sr || (shHost && !shHost.isConnected)) { shadowRoots.splice(i, 1); removed = true; }
+    }
+    if (removed && observer) {
+      try {
+        observer.disconnect();
+        observer.observe(document.documentElement, OBSERVE_OPTS);
+        for (var k = 0; k < shadowRoots.length; k++) observeRoot(shadowRoots[k]);
+      } catch (e) {}
+    }
+  }
+
   var sentinelDelay = 1500;
   function sentinelLoop() {
+    try { pruneShadowRoots(); } catch (e) {}
     var dirty = false;
     try { dirty = sentinelCheck(); } catch (e) {}
     sentinelDelay = dirty ? Math.min(sentinelDelay * 2, 30000) : 1500;
