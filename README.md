@@ -48,3 +48,6 @@ walkthrough: `LEGGIMI.md`.
 
 ## License
 [MIT](LICENSE) — free to use, modify and share.
+
+## Contact
+For any questions, please contact: sebastian.nicosia@icloud.com
