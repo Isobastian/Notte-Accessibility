@@ -19,6 +19,12 @@
   // L'unica eccezione per-sito e' `overrides`.
   var DEFAULTS = { overrides: {} };
 
+  // Marca di build: permette di verificare QUALE versione del codice sta
+  // girando davvero in un browser (utile quando un temporary add-on di Firefox
+  // sembra non aggiornarsi). Controllo dalla console della pagina:
+  //   document.documentElement.getAttribute("data-notte-build")
+  try { document.documentElement.setAttribute("data-notte-build", "20260715-selectfix3"); } catch (e) {}
+
   /* ---------- Salvagente prestazioni (circuit breaker) ----------
    * Su pagine enormi e iper-dinamiche (es. Gmail) il lavoro di tematizzazione
    * puo' saturare il thread principale al punto che Chrome blocca la scheda
@@ -32,19 +38,54 @@
     : function () { return Date.now(); };
   var winStart = 0, winBusy = 0;
   var WIN_MS = 2000;      // ampiezza della finestra di misura
-  var WIN_BUDGET = 1400;  // ms di thread nella finestra oltre i quali molliamo (~70%)
+  var WIN_BUDGET = 1800;  // ms di thread nella finestra oltre i quali molliamo (~90%): soglia ALTA, il breaker scatta solo se Notte monopolizza davvero il thread. A 70% Firefox (piu' lento su OWA) scattava di continuo, disabilitando hover/selezione/stati letto.
   function noteBusy(t0) {
     var now = perfNow();
     if (now - winStart > WIN_MS) { winStart = now; winBusy = 0; }
     winBusy += now - t0;
     if (!bailed && winBusy > WIN_BUDGET) tripBreaker();
   }
+  // Quante volte e' scattato su questa pagina: il cooldown cresce ad ogni
+  // ricaduta, cosi' una pagina davvero e stabilmente troppo pesante non
+  // ritenta di continuo consumando lavoro a vuoto.
+  var bailCount = 0, bailTimer = null;
   function tripBreaker() {
+    if (bailed) return;
     bailed = true;
-    try { stopObserver(); } catch (e) {}
-    // Niente altro lavoro: lo stile gia' applicato resta com'e' (rimuoverlo
-    // sarebbe altro lavoro pesante). Su pagine cosi' conviene il dark mode
-    // nativo del sito o l'interruttore per-sito.
+    try { document.documentElement.setAttribute("data-notte-bailed", "1"); } catch (e) {}
+    // NB: NON fermiamo piu' l'observer e NON restiamo bailed per sempre. Il
+    // vecchio comportamento (stop totale, permanente) su una web-app enorme e
+    // iper-dinamica (Outlook Web) era peggio del male che curava: appena un
+    // picco di lavoro faceva scattare il breaker, l'observer si spegneva e
+    // TUTTO cio' che compariva dopo (menu, dropdown, email caricate,
+    // selezione) restava bianco/non tematizzato per il resto della sessione,
+    // dando l'impressione che il plugin si fosse rotto (bug verificato dal
+    // vivo su OWA: il menu "..." resta bianco, la selezione non si aggiorna,
+    // un div bianco appena inserito non viene mai scurito). Ora:
+    //  - l'observer resta ATTIVO: i nodi nuovi PICCOLI (menu/dropdown) vengono
+    //    comunque tematizzati subito con un walk leggero e limitato (walkLight),
+    //    cosi' non restano mai bianchi;
+    //  - sospendiamo SOLO il lavoro pesante (resync di interi sotto-alberi sui
+    //    cambi di classe/attributo, e le ripassate complete sui cambi CSS): e'
+    //    quella la raffica che satura il thread;
+    //  - dopo un cooldown ci riprendiamo del tutto con un walk completo, che
+    //    recupera anche cio' che e' stato saltato durante la pausa.
+    bailCount++;
+    var cooldown = Math.min(2500 * Math.pow(2, bailCount - 1), 20000); // 2.5s,5s,10s...max 20s
+    if (bailTimer) clearTimeout(bailTimer);
+    bailTimer = setTimeout(function () {
+      bailTimer = null;
+      // "bailed" va resettato SEMPRE, anche se il tema e' stato disattivato nel
+      // frattempo: altrimenti resterebbe bloccato a true per sempre e
+      // applyTheme() (che rifiuta di lavorare mentre bailed e' true) non
+      // funzionerebbe piu' su questa pagina se l'utente riaccende il tema.
+      bailed = false;
+      try { document.documentElement.setAttribute("data-notte-bailed", "0"); } catch (e) {}
+      winStart = perfNow(); winBusy = 0;
+      if (!themed) return;
+      try { walk(document.documentElement); } catch (e) {}
+      try { startObserver(); } catch (e) {} // difensivo: no-op se gia' attivo
+    }, cooldown);
   }
 
   /* ---------- Shadow DOM ----------
@@ -554,7 +595,17 @@
     // (bug segnalato: riquadro di risposta email di Outlook Web rimasto
     // bianco per ore, tornato normale solo dopo un refresh).
     try {
-      applyColor(el, "background-color", "bg", cs.backgroundColor);
+      // Icone "mask": molti design system (MediaWiki/Wikipedia, Fluent, ecc.)
+      // disegnano le icone con mask-image (la FORMA) + background-color (il
+      // COLORE dell'icona che traspare dalla maschera). Quel background-color
+      // NON e' lo sfondo di un pannello ma il colore in primo piano dell'icona:
+      // trattandolo come sfondo lo lasciavamo scuro sul tema scuro, quindi
+      // l'icona spariva (bug: hamburger di Wikipedia nero su nero). Se
+      // l'elemento e' mascherato, rimappiamo il suo background-color come TESTO
+      // (fg): un'icona scura diventa chiara e torna visibile.
+      var maskImg = cs.maskImage || cs.webkitMaskImage || "none";
+      var isMasked = !!maskImg && maskImg !== "none";
+      applyColor(el, "background-color", isMasked ? "fg" : "bg", cs.backgroundColor);
       applyColor(el, "color", "fg", cs.color);
       // Bordi LATO PER LATO, non col solo borderTop come prima: un divisore
       // fatto con solo border-bottom, o un triangolino/caret CSS (width:0 +
@@ -642,12 +693,18 @@
     // elementi e teniamo conto del tempo speso (vedi noteBusy/circuit breaker).
     var i = 0;
     function rchunk() {
-      if (bailed) return;
+      // Niente "if (bailed) return" in testa: un resync guidato da
+      // un'interazione (selezione di un messaggio, hover, stato letto/non
+      // letto) riguarda un sotto-albero PICCOLO e DEVE girare anche col
+      // breaker scattato, altrimenti selezione e stati smettono di
+      // aggiornarsi (bug Firefox: nessuna selezione, letti = non letti). Il
+      // primo blocco gira sempre; solo la CONTINUAZIONE su sotto-alberi
+      // enormi viene sospesa durante il bail.
       var t0 = perfNow();
       var end = Math.min(i + 400, list.length);
       for (; i < end; i++) resyncEl(list[i]);
       noteBusy(t0);
-      if (i < list.length) window.setTimeout(rchunk, 0);
+      if (i < list.length && !bailed) window.setTimeout(rchunk, 0);
     }
     rchunk();
   }
@@ -685,6 +742,29 @@
     chunk();
   }
 
+  // Tematizza un sotto-albero PICCOLO anche mentre il circuit breaker e'
+  // scattato. Serve ai menu/dropdown appena aperti: sono nodi minuscoli, ma
+  // senza questo resterebbero bianchi per tutto il cooldown (il walk normale
+  // si autoannulla quando bailed e' true). Cap severo sul numero di elementi:
+  // un sotto-albero grande viene lasciato alla ripresa completa, per non
+  // rischiare di ri-saturare il thread proprio mentre stiamo cercando di
+  // tenerlo libero. Sincrono e NON conteggiato dal breaker (noteBusy): il
+  // lavoro e' minimo e limitato dal cap.
+  function walkLight(root) {
+    if (!root || root.nodeType !== 1) return;
+    try {
+      styleEl(root);
+      var list = root.querySelectorAll ? root.querySelectorAll("*") : [];
+      if (list.length > 300) return; // troppo grande: lo prende la ripresa
+      for (var i = 0; i < list.length; i++) {
+        try {
+          styleEl(list[i]);
+          if (list[i].shadowRoot) { registerShadowRoot(list[i].shadowRoot); walkLight(list[i].shadowRoot); }
+        } catch (e) {}
+      }
+    } catch (e) {}
+  }
+
   var observer = null;
   // Osserviamo TUTTI gli attributi, non solo style/class: i framework moderni
   // (React Aria - usato da App Store Connect, vedi data-react-aria-pressable)
@@ -712,7 +792,7 @@
   var pendSub = null, pendEl = null, flushScheduled = false;
   function ensurePending() { if (!pendSub) { pendSub = new Set(); pendEl = new Set(); } }
   function scheduleFlush() {
-    if (flushScheduled || bailed) return;
+    if (flushScheduled) return;
     flushScheduled = true;
     var raf = window.requestAnimationFrame || function (f) { return window.setTimeout(f, 16); };
     raf(flushResync);
@@ -730,7 +810,7 @@
   }
   function flushResync() {
     flushScheduled = false;
-    if (bailed || !pendSub) return;
+    if (!pendSub) return;
     var subs = pendSub, els = pendEl;
     pendSub = null; pendEl = null;
     subs.forEach(function (el) {
@@ -776,7 +856,10 @@
             if (nodes.length) sentinelSoon(); // vedi sentinelSoon: SPA nav
             for (var j = 0; j < nodes.length; j++) {
               var n = nodes[j];
-              walk(n);
+              // Mentre il breaker e' scattato usiamo il walk leggero (limitato):
+              // tematizza subito menu/dropdown appena aperti senza rischiare di
+              // ri-saturare il thread. A regime, walk() normale (a blocchi).
+              if (bailed) walkLight(n); else walk(n);
               // Un <style> o <link rel="stylesheet"> aggiunto cambia i colori
               // anche di elementi GIA' processati: il walk del solo nodo
               // aggiunto non basta, serve una ripassata completa (per i <link>
@@ -863,6 +946,25 @@
   // ritematizzati (bug: card bianche "congelate" su App Store Connect,
   // inline con il nostro color ma senza background-color).
   var hoverRoots = [];
+  // Scurisce lo sfondo chiaro che compare SOLO al passaggio del mouse (regola
+  // :hover pura del sito, invisibile al nostro observer perche' non tocca il
+  // DOM). Prima invece forzavamo scuro il TESTO dell'intero sotto-albero,
+  // ottenendo testo nero su fondo azzurro chiaro: leggibile ma stonato col
+  // tema scuro (segnalato: etichetta "Nouveau" e chevron NERI in hover sulla
+  // toolbar di Outlook Web). Un background inline !important batte la regola
+  // :hover del sito, quindi scuriamo lo sfondo e lasciamo il testo chiaro.
+  function protectBg(el) {
+    if (el.__notteHovering) return;
+    var cs;
+    try { cs = getComputedStyle(el); } catch (e) { return; }
+    var c = parseColor(cs.backgroundColor);
+    if (!c || c.a < 0.3 || luminance(c) < 150) return;
+    el.__notteHoverBg = el.style.getPropertyValue("background-color");
+    el.style.setProperty("background-color", remap(c, "bg"), "important");
+    el.__notteHovering = true;
+    el[STYLE_SIG] = el.getAttribute("style");
+    if (hoverRoots.indexOf(el) === -1) hoverRoots.push(el);
+  }
   function protectSubtree(root) {
     var nodes = [root].concat(Array.prototype.slice.call(root.querySelectorAll("*")));
     for (var i = 0; i < nodes.length; i++) {
@@ -898,9 +1000,20 @@
         var el = nodes[i];
         if (!el.__notteHovering) continue;
         el.__notteHovering = false;
-        if (el.__notteHoverColor) el.style.setProperty("color", el.__notteHoverColor, "important");
-        else el.style.removeProperty("color");
-        el.__notteHoverColor = undefined;
+        // Ripristina lo SFONDO se lo avevamo scurito noi per l'hover (protectBg).
+        if (el.__notteHoverBg !== undefined) {
+          if (el.__notteHoverBg) el.style.setProperty("background-color", el.__notteHoverBg, "important");
+          else el.style.removeProperty("background-color");
+          el.__notteHoverBg = undefined;
+        }
+        // Ripristina il COLORE solo se lo avevamo forzato noi (protectSubtree):
+        // per gli elementi protetti col solo sfondo __notteHoverColor e'
+        // undefined e NON dobbiamo toccare il colore themizzato normale.
+        if (el.__notteHoverColor !== undefined) {
+          if (el.__notteHoverColor) el.style.setProperty("color", el.__notteHoverColor, "important");
+          else el.style.removeProperty("color");
+          el.__notteHoverColor = undefined;
+        }
         // Riallinea la firma anti-eco: altrimenti l'observer vedrebbe questa
         // nostra stessa scrittura come un cambiamento "esterno" e la
         // rincorrerebbe inutilmente con resyncEl().
@@ -940,8 +1053,17 @@
         var cs;
         try { cs = getComputedStyle(el); } catch (e) { cs = null; }
         var bg = cs ? parseColor(cs.backgroundColor) : null;
-        if ((bg && bg.a >= 0.3 && luminance(bg) >= 150) ||
-            pseudoLight(el, "before") || pseudoLight(el, "after")) protectSubtree(el);
+        if (bg && bg.a >= 0.3 && luminance(bg) >= 150) {
+          // Sfondo chiaro dell'hover su un vero elemento: lo SCURIAMO e
+          // lasciamo il testo chiaro -> hover scuro coerente col tema, niente
+          // piu' testo nero su fondo azzurro.
+          protectBg(el);
+        } else if (pseudoLight(el, "before") || pseudoLight(el, "after")) {
+          // Sfondo chiaro disegnato da un ::before/::after: non raggiungibile
+          // con un background inline, quindi ripieghiamo sulla protezione del
+          // testo (lo forziamo scuro perche' resti leggibile sul chiaro).
+          protectSubtree(el);
+        }
       }
       el = upEl(el);
       depth++;
@@ -1118,11 +1240,15 @@
 
   var sentinelDelay = 1500;
   function sentinelLoop() {
-    if (bailed) return;
-    try { pruneShadowRoots(); } catch (e) {}
-    var dirty = false;
-    try { dirty = sentinelCheck(); } catch (e) {}
-    sentinelDelay = dirty ? Math.min(sentinelDelay * 2, 30000) : 1500;
+    // Saltiamo solo il LAVORO mentre bailed e' true, ma NON interrompiamo la
+    // catena di setTimeout (un "return" qui la spegnerebbe per sempre, e con
+    // essa pruneShadowRoots, anche dopo che il breaker si e' ripreso).
+    if (!bailed) {
+      try { pruneShadowRoots(); } catch (e) {}
+      var dirty = false;
+      try { dirty = sentinelCheck(); } catch (e) {}
+      sentinelDelay = dirty ? Math.min(sentinelDelay * 2, 30000) : 1500;
+    }
     setTimeout(sentinelLoop, sentinelDelay);
   }
   setTimeout(sentinelLoop, 1500);
@@ -1142,7 +1268,7 @@
     return e.target;
   }
   function onHoverOver(e) {
-    if (!themed || bailed) return;
+    if (!themed) return;
     sweepHover(); // rilascia le protezioni rimaste appese (vedi sweepHover)
     var t = hoverTarget(e);
     hoverProtect(t);
@@ -1159,7 +1285,7 @@
     setTimeout(again, 400);
   }
   function onHoverOut(e) {
-    if (!themed || bailed) return;
+    if (!themed) return;
     hoverRestore(hoverTarget(e));
     // Doppio controllo asincrono: dopo il mouseout gli stati :hover sono gia'
     // aggiornati, quindi lo sweep libera anche contenitori non sulla catena
@@ -1178,4 +1304,57 @@
   // nessun mouseover successivo: rilasciamo tutto esplicitamente.
   document.addEventListener("mouseleave", function () { if (themed) sweepHover(); }, true);
   window.addEventListener("blur", function () { if (themed) sweepHover(); });
+
+  /* ---------- Resync su selezione / focus ----------
+   * Alcuni siti (Outlook Web, sopratutto in Firefox) cambiano il colore di una
+   * riga SELEZIONATA / a fuoco tramite CSS di STATO che NON produce alcuna
+   * mutazione del DOM osservabile dal MutationObserver (es. regole legate a
+   * :focus/:focus-within, o riscritture interne che Firefox serve in modo
+   * diverso da Chrome). Risultato: la riga mantiene il nostro vecchio override
+   * scuro NEUTRO e la selezione/lo stato letto non si vede (bug verificato dal
+   * vivo su OWA Firefox: colore reale sotto = azzurro rgb(199,224,244), ma il
+   * nostro inline restava rgb(20,20,20)). Come gia' facciamo per l'hover
+   * (mouseover), ci agganciamo a click e focusin e RILEGGIAMO i colori del
+   * sotto-albero attorno al bersaglio: resyncEl toglie il nostro override,
+   * rilegge il colore vero (ora azzurro) e lo ri-scurisce in modo DISTINTO
+   * (banda d'accento), rendendo visibile la selezione. In Chrome, dove
+   * l'observer gia' cattura il cambio, questo e' un no-op (resyncEl non
+   * riscrive nulla se il colore non e' cambiato). */
+  // Ambito "riga" attorno a un bersaglio: il piu' vicino contenitore-riga, o,
+  // in mancanza, qualche livello di antenati.
+  function rowScopeOf(target) {
+    var scope = null;
+    try {
+      scope = target.closest &&
+        target.closest('[role="option"],[role="row"],[role="listitem"],[role="treeitem"],li,tr');
+    } catch (e) { scope = null; }
+    if (!scope) { scope = target; var up = 0; while (scope.parentElement && up < 6) { scope = scope.parentElement; up++; } }
+    return scope;
+  }
+  // La riga risincronizzata all'ultima interazione: quando la selezione si
+  // sposta, la riga PRECEDENTE perde lo stato SENZA mutazione DOM e, se non la
+  // rileggiamo, resta "bloccata" evidenziata (bug: tutte le righe sembrano
+  // selezionate). La memorizziamo e la ripassiamo al click successivo.
+  var lastResyncScope = null;
+  function resyncAround(target) {
+    if (!themed || !target || target.nodeType !== 1) return;
+    var scope = rowScopeOf(target);
+    if (lastResyncScope && lastResyncScope !== scope && lastResyncScope.isConnected) {
+      try { resyncSubtree(lastResyncScope); } catch (e) {}
+    }
+    lastResyncScope = scope;
+    try { resyncSubtree(scope); } catch (e) {}
+  }
+  function onSelectish(e) {
+    if (!themed) return;
+    var t;
+    try { t = (e.composedPath && e.composedPath()[0]) || e.target; } catch (er) { t = e.target; }
+    if (!t) return;
+    // Ritardo breve: lasciamo che il sito applichi lo stato prima di rileggere;
+    // due colpi coprono anche le transizioni CSS che ritardano il colore.
+    setTimeout(function () { resyncAround(t); }, 60);
+    setTimeout(function () { resyncAround(t); }, 260);
+  }
+  document.addEventListener("click", onSelectish, true);
+  document.addEventListener("focusin", onSelectish, true);
 })();

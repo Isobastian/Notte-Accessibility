@@ -1,0 +1,19 @@
+# Normalize line endings across machines (Mac + Windows).
+# Without this, switching between your two computers can make Git think an
+# entire file changed just because of invisible CRLF vs LF differences.
+# This tells Git to store everything with LF and check it out consistently.
+
+* text=auto eol=lf
+
+# Shell scripts must always be LF or they break on macOS/Linux.
+*.sh text eol=lf
+
+# Treat these as binary so Git never touches their bytes.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.woff binary
+*.woff2 binary
+*.zip binary
