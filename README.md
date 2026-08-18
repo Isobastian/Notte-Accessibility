@@ -92,3 +92,6 @@ Everyone is welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) and our
 
 ## License
 [MIT](LICENSE) — free to use, modify and share.
+
+## Contact
+For any questions, please contact: sebastian.nicosia@icloud.com
