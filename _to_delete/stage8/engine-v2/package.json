@@ -1,0 +1,16 @@
+{
+  "name": "notte-engine-v2",
+  "version": "2.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Notte v2 stylesheet-transformation dark-mode engine (dev build).",
+  "scripts": {
+    "build": "node build.mjs",
+    "test": "node test/color.test.mjs"
+  },
+  "devDependencies": {
+    "esbuild": "^0.23.0",
+    "playwright": "^1.62.1",
+    "pngjs": "^7.0.0"
+  }
+}
