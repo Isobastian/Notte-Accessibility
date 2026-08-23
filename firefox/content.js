@@ -1,186 +1,63 @@
-/*
- * Notte - Dark Mode (motore ad alto contrasto)
- * Invece di invertire la pagina, RIMAPPA i colori:
- *  - ogni sfondo viene portato in una banda SCURA (L 8-22)
- *  - ogni testo viene portato in una banda CHIARA (L 72-96)
- * mantenendo tinta e saturazione. Cosi il contrasto e' sempre alto e leggibile,
- * senza i grigi "fangosi" del vecchio metodo a inversione.
- */
-(function () {
-  "use strict";
-
-  var api = (typeof browser !== "undefined") ? browser : chrome;
-  var BASE_ID = "__notte_base__";
-  var MARK = "__notteThemed";
-  var host = location.hostname || "";
-  // Comportamento fisso (non piu' configurabile dal popup, per semplicita':
-  // nuovi siti partono sempre scuri, i siti gia' scuri di loro vengono
-  // sempre rilevati e lasciati stare, le immagini restano sempre normali).
-  // L'unica eccezione per-sito e' `overrides`.
-  var DEFAULTS = { overrides: {} };
-
-  // Marca di build: permette di verificare QUALE versione del codice sta
-  // girando davvero in un browser (utile quando un temporary add-on di Firefox
-  // sembra non aggiornarsi). Controllo dalla console della pagina:
-  //   document.documentElement.getAttribute("data-notte-build")
-  try { document.documentElement.setAttribute("data-notte-build", "20260715-selectfix3"); } catch (e) {}
-
-  /* ---------- Salvagente prestazioni (circuit breaker) ----------
-   * Su pagine enormi e iper-dinamiche (es. Gmail) il lavoro di tematizzazione
-   * puo' saturare il thread principale al punto che Chrome blocca la scheda
-   * ("Pagina non risponde"). Misuriamo quanto tempo Notte passa nei suoi cicli
-   * pesanti (walk/resync) dentro una finestra scorrevole: se supera una soglia
-   * alta (sta monopolizzando il thread), stacchiamo observer e ricicli e
-   * lasciamo la pagina reattiva. Sui siti normali non scatta mai. */
-  var bailed = false;
-  var perfNow = (window.performance && performance.now)
-    ? function () { return performance.now(); }
-    : function () { return Date.now(); };
-  var winStart = 0, winBusy = 0;
-  var WIN_MS = 2000;      // ampiezza della finestra di misura
-  var WIN_BUDGET = 1800;  // ms di thread nella finestra oltre i quali molliamo (~90%): soglia ALTA, il breaker scatta solo se Notte monopolizza davvero il thread. A 70% Firefox (piu' lento su OWA) scattava di continuo, disabilitando hover/selezione/stati letto.
-  function noteBusy(t0) {
-    var now = perfNow();
-    if (now - winStart > WIN_MS) { winStart = now; winBusy = 0; }
-    winBusy += now - t0;
-    if (!bailed && winBusy > WIN_BUDGET) tripBreaker();
+(() => {
+  // src/color/convert.js
+  function clamp01(x) {
+    return x < 0 ? 0 : x > 1 ? 1 : x;
   }
-  // Quante volte e' scattato su questa pagina: il cooldown cresce ad ogni
-  // ricaduta, cosi' una pagina davvero e stabilmente troppo pesante non
-  // ritenta di continuo consumando lavoro a vuoto.
-  var bailCount = 0, bailTimer = null;
-  function tripBreaker() {
-    if (bailed) return;
-    bailed = true;
-    try { document.documentElement.setAttribute("data-notte-bailed", "1"); } catch (e) {}
-    // NB: NON fermiamo piu' l'observer e NON restiamo bailed per sempre. Il
-    // vecchio comportamento (stop totale, permanente) su una web-app enorme e
-    // iper-dinamica (Outlook Web) era peggio del male che curava: appena un
-    // picco di lavoro faceva scattare il breaker, l'observer si spegneva e
-    // TUTTO cio' che compariva dopo (menu, dropdown, email caricate,
-    // selezione) restava bianco/non tematizzato per il resto della sessione,
-    // dando l'impressione che il plugin si fosse rotto (bug verificato dal
-    // vivo su OWA: il menu "..." resta bianco, la selezione non si aggiorna,
-    // un div bianco appena inserito non viene mai scurito). Ora:
-    //  - l'observer resta ATTIVO: i nodi nuovi PICCOLI (menu/dropdown) vengono
-    //    comunque tematizzati subito con un walk leggero e limitato (walkLight),
-    //    cosi' non restano mai bianchi;
-    //  - sospendiamo SOLO il lavoro pesante (resync di interi sotto-alberi sui
-    //    cambi di classe/attributo, e le ripassate complete sui cambi CSS): e'
-    //    quella la raffica che satura il thread;
-    //  - dopo un cooldown ci riprendiamo del tutto con un walk completo, che
-    //    recupera anche cio' che e' stato saltato durante la pausa.
-    bailCount++;
-    var cooldown = Math.min(2500 * Math.pow(2, bailCount - 1), 20000); // 2.5s,5s,10s...max 20s
-    if (bailTimer) clearTimeout(bailTimer);
-    bailTimer = setTimeout(function () {
-      bailTimer = null;
-      // "bailed" va resettato SEMPRE, anche se il tema e' stato disattivato nel
-      // frattempo: altrimenti resterebbe bloccato a true per sempre e
-      // applyTheme() (che rifiuta di lavorare mentre bailed e' true) non
-      // funzionerebbe piu' su questa pagina se l'utente riaccende il tema.
-      bailed = false;
-      try { document.documentElement.setAttribute("data-notte-bailed", "0"); } catch (e) {}
-      winStart = perfNow(); winBusy = 0;
-      if (!themed) return;
-      try { walk(document.documentElement); } catch (e) {}
-      try { startObserver(); } catch (e) {} // difensivo: no-op se gia' attivo
-    }, cooldown);
+  function luminance(c) {
+    return 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b;
   }
-
-  /* ---------- Shadow DOM ----------
-   * Molti siti moderni (es. App Store Connect) incapsulano parti dell'interfaccia
-   * in shadow DOM. querySelectorAll sul documento NON vede dentro gli shadow
-   * root, quindi quei pezzi restavano ai colori originali (bug di "inversione
-   * parziale" segnalato dall'utente).
-   *
-   * Il content script gira in un JS world ISOLATO da quello della pagina:
-   * patchare Element.prototype.attachShadow qui non intercetterebbe le
-   * chiamate della pagina stessa (world diverso = prototipi diversi, anche se
-   * il DOM e' condiviso). Per questo il patch vero e proprio (forza
-   * mode:"open" anche per gli shadow root "closed") vive in shadow-patch.js,
-   * iniettato con "world":"MAIN" nel manifest. Quello script ci avvisa con un
-   * CustomEvent sul DOM: gli eventi attraversano i "world", le proprieta' JS
-   * custom no.
-   */
-  var shadowRoots = [];
-  // Registra uno shadow root: base CSS, observer e ANCHE i listener di hover.
-  // Questi ultimi sono fondamentali: quando il mouse si sposta TRA elementi
-  // dentro uno shadow root, target e relatedTarget vengono ritarghettati
-  // entrambi sull'host, e per specifica l'evento NON viene consegnato ai
-  // listener fuori dal root (document) - verificato dal vivo su App Store
-  // Connect: passando tra le voci del menu account (dentro <amp-nav>) al
-  // document arrivava UN solo mouseover (l'ingresso nel componente), poi piu'
-  // nulla. Per questo la protezione hover non scattava MAI sulle voci del
-  // menu. Ascoltiamo quindi direttamente dentro ogni shadow root.
-  function registerShadowRoot(root) {
-    if (!root || shadowRoots.indexOf(root) !== -1) return false;
-    shadowRoots.push(root);
-    attachHoverListeners(root);
-    if (themed) { ensureBase(root); observeRoot(root); }
-    return true;
-  }
-  document.addEventListener("__notte_shadow_attached__", function (e) {
-    var shadowHost = e.target; // rinominato per non fare ombra alla var "host" (hostname) usata altrove
-    if (!shadowHost || !shadowHost.shadowRoot) return;
-    if (registerShadowRoot(shadowHost.shadowRoot) && themed) walk(shadowHost.shadowRoot);
-  }, true);
-
-  // Vedi shadow-patch.js: le regole CSS aggiunte via CSSOM (insertRule, usato
-  // da styled-components in produzione) NON producono mutazioni DOM. Se una
-  // regola arriva dopo l'ultima passata (es. modulo grafici caricato tardi su
-  // App Store Connect), gli elementi gia' processati restavano coi colori
-  // vecchi per sempre (bug: card bianche in Analytics). All'avviso ri-passiamo
-  // il DOM, con debounce: tanti avvisi ravvicinati = una sola passata, e
-  // applyColor e' comunque un no-op dove non e' cambiato nulla.
-  // Debounce CON tetto massimo: un debounce solo "trailing" verrebbe
-  // rimandato all'infinito da un sito che inserisce regole di continuo
-  // (es. grafici che si ridisegnano) e la ripassata non partirebbe mai
-  // (bug: card rimaste bianche finche' non si ricaricava la pagina).
-  // Garantiamo una passata entro ~500ms dal primo avviso, sempre.
-  var cssRethemeTimer = null, cssRethemeFirst = 0;
-  function scheduleRetheme() {
-    if (!themed || bailed) return;
-    var now = Date.now();
-    if (!cssRethemeTimer) cssRethemeFirst = now;
-    else clearTimeout(cssRethemeTimer);
-    var wait = (now - cssRethemeFirst > 500) ? 0 : 150;
-    cssRethemeTimer = setTimeout(function () {
-      cssRethemeTimer = null;
-      if (themed) applyTheme();
-    }, wait);
-  }
-  document.addEventListener("__notte_css_changed__", scheduleRetheme, true);
-
-  /* ---------- Matematica dei colori (rimappatura in HSL) ---------- */
-  function parseColor(str) {
-    if (!str) return null;
-    var m = str.match(/rgba?\(([^)]+)\)/i);
-    if (m) {
-      var p = m[1].split(",").map(function (x) { return parseFloat(x); });
-      if (p.length < 3) return null;
-      return { r: p[0], g: p[1], b: p[2], a: (p.length > 3 ? p[3] : 1) };
+  function wcagRelLum(c) {
+    function ch(v) {
+      v /= 255;
+      return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
     }
-    // Design system moderni (es. App Store Connect: Analytics) usano CSS
-    // Color 4 - getComputedStyle() restituisce "oklch(L C H / A)" invece di
-    // rgb(). Senza gestirlo, parseColor tornava null e l'elemento restava
-    // ai colori originali (bug: sezioni intere "non invertite" su siti che
-    // usano oklch/oklab per i colori).
-    var o = str.match(/oklch\(([^)]+)\)/i);
-    if (o) return oklchToRgb(o[1]);
-    // Safari (soprattutto sui siti Apple, es. App Store Connect) serializza i
-    // colori wide-gamut come "color(display-p3 r g b / a)" o "color(srgb ...)"
-    // in getComputedStyle. Senza gestirli parseColor tornava null e l'elemento
-    // restava chiaro SOLO su Safari (Chrome riceve/risolve rgb normale) - bug:
-    // fasce bianche su App Store Connect solo in Safari.
-    var k = str.match(/color\(\s*(srgb|display-p3)\s+([^)]+)\)/i);
-    if (k) return colorFuncToRgb(k[1].toLowerCase(), k[2]);
-    return null;
+    return 0.2126 * ch(c.r) + 0.7152 * ch(c.g) + 0.0722 * ch(c.b);
   }
-
-  // Converte "color(srgb r g b / a)" o "color(display-p3 r g b / a)" (componenti
-  // 0-1 o percentuali) in {r,g,b,a} sRGB 0-255. Per display-p3: linearizza,
-  // matrice P3->sRGB lineare (CSS Color 4), poi ri-applica la gamma sRGB.
+  function contrastRatio(a, b) {
+    var la = wcagRelLum(a), lb = wcagRelLum(b);
+    var hi = Math.max(la, lb), lo = Math.min(la, lb);
+    return (hi + 0.05) / (lo + 0.05);
+  }
+  function rgbToHsl(r, g, b) {
+    r /= 255;
+    g /= 255;
+    b /= 255;
+    var max = Math.max(r, g, b), min = Math.min(r, g, b);
+    var h = 0, s = 0, l = (max + min) / 2;
+    if (max !== min) {
+      var d = max - min;
+      s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+      if (max === r) h = (g - b) / d + (g < b ? 6 : 0);
+      else if (max === g) h = (b - r) / d + 2;
+      else h = (r - g) / d + 4;
+      h /= 6;
+    }
+    return { h: h * 360, s: s * 100, l: l * 100 };
+  }
+  function hue2rgb(p, q, t) {
+    if (t < 0) t += 1;
+    if (t > 1) t -= 1;
+    if (t < 1 / 6) return p + (q - p) * 6 * t;
+    if (t < 1 / 2) return q;
+    if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
+    return p;
+  }
+  function hslToRgb(h, s, l) {
+    h /= 360;
+    s /= 100;
+    l /= 100;
+    var r, g, b;
+    if (s === 0) {
+      r = g = b = l;
+    } else {
+      var q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+      var p = 2 * l - q;
+      r = hue2rgb(p, q, h + 1 / 3);
+      g = hue2rgb(p, q, h);
+      b = hue2rgb(p, q, h - 1 / 3);
+    }
+    return [Math.round(r * 255), Math.round(g * 255), Math.round(b * 255)];
+  }
   function colorFuncToRgb(space, inner) {
     var parts = inner.split("/");
     var a = 1;
@@ -197,23 +74,24 @@
     }
     var r = num(comps[0]), g = num(comps[1]), b = num(comps[2]);
     if (isNaN(r) || isNaN(g) || isNaN(b)) return null;
-    function to255(c) { return Math.round(Math.max(0, Math.min(1, c)) * 255); }
-    if (space === "srgb") return { r: to255(r), g: to255(g), b: to255(b), a: a };
-    // display-p3
-    function lin(c) { c = Math.max(0, Math.min(1, c)); return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4); }
-    var rl = lin(r), gl = lin(g), bl = lin(b);
-    var R = 1.2249401762805786 * rl - 0.2249401762805786 * gl;
-    var G = -0.0420569547096881 * rl + 1.0420569547096881 * gl;
-    var B = -0.0196375545903344 * rl - 0.0786360455506319 * gl + 1.0982735901409634 * bl;
-    function toS(c) {
-      var v = c <= 0.0031308 ? 12.92 * c : 1.055 * Math.pow(Math.max(c, 0), 1 / 2.4) - 0.055;
-      return Math.round(Math.max(0, Math.min(1, v)) * 255);
+    function to255(c) {
+      return Math.round(clamp01(c) * 255);
     }
-    return { r: toS(R), g: toS(G), b: toS(B), a: a };
+    if (space === "srgb") return { r: to255(r), g: to255(g), b: to255(b), a };
+    function lin(c) {
+      c = clamp01(c);
+      return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+    }
+    var rl = lin(r), gl = lin(g), bl = lin(b);
+    var R = 1.2249401762805785 * rl - 0.2249401762805786 * gl;
+    var G = -0.0420569547096881 * rl + 1.042056954709688 * gl;
+    var B = -0.0196375545903344 * rl - 0.0786360455506319 * gl + 1.0982735901409635 * bl;
+    function toS(c) {
+      var v = c <= 31308e-7 ? 12.92 * c : 1.055 * Math.pow(Math.max(c, 0), 1 / 2.4) - 0.055;
+      return Math.round(clamp01(v) * 255);
+    }
+    return { r: toS(R), g: toS(G), b: toS(B), a };
   }
-
-  // Converte oklch(L C H [/ A]) in {r,g,b,a} sRGB (0-255). Formule standard
-  // OKLab/OKLCH (Bjorn Ottosson) - matrici della CSS Color 4 spec.
   function oklchToRgb(inner) {
     var parts = inner.split("/");
     var a = 1;
@@ -228,1133 +106,1631 @@
     var C = parseFloat(lch[1]);
     var H = parseFloat(lch[2]);
     if (isNaN(L) || isNaN(C) || isNaN(H)) return null;
-
     var hRad = H * Math.PI / 180;
     var a_ = C * Math.cos(hRad);
     var b_ = C * Math.sin(hRad);
-
     var l_ = L + 0.3963377774 * a_ + 0.2158037573 * b_;
     var m_ = L - 0.1055613458 * a_ - 0.0638541728 * b_;
-    var s_ = L - 0.0894841775 * a_ - 1.2914855480 * b_;
-
+    var s_ = L - 0.0894841775 * a_ - 1.291485548 * b_;
     var l = l_ * l_ * l_;
     var m = m_ * m_ * m_;
     var s = s_ * s_ * s_;
-
     var rl = 4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s;
     var gl = -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s;
-    var bl = -0.0041960863 * l - 0.7034186147 * m + 1.7076147010 * s;
-
+    var bl = -0.0041960863 * l - 0.7034186147 * m + 1.707614701 * s;
     function toSrgb(c) {
-      var v = c <= 0.0031308 ? 12.92 * c : 1.055 * Math.pow(Math.max(c, 0), 1 / 2.4) - 0.055;
-      v = Math.max(0, Math.min(1, v));
-      return Math.round(v * 255);
+      var v = c <= 31308e-7 ? 12.92 * c : 1.055 * Math.pow(Math.max(c, 0), 1 / 2.4) - 0.055;
+      return Math.round(clamp01(v) * 255);
     }
-    return { r: toSrgb(rl), g: toSrgb(gl), b: toSrgb(bl), a: a };
+    return { r: toSrgb(rl), g: toSrgb(gl), b: toSrgb(bl), a };
   }
 
-  function rgbToHsl(r, g, b) {
-    r /= 255; g /= 255; b /= 255;
-    var max = Math.max(r, g, b), min = Math.min(r, g, b);
-    var h = 0, s = 0, l = (max + min) / 2;
-    if (max !== min) {
-      var d = max - min;
-      s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
-      if (max === r) h = (g - b) / d + (g < b ? 6 : 0);
-      else if (max === g) h = (b - r) / d + 2;
-      else h = (r - g) / d + 4;
-      h /= 6;
-    }
-    return { h: h * 360, s: s * 100, l: l * 100 };
+  // src/color/named.js
+  var NAMED = {
+    aliceblue: "#f0f8ff",
+    antiquewhite: "#faebd7",
+    aqua: "#00ffff",
+    aquamarine: "#7fffd4",
+    azure: "#f0ffff",
+    beige: "#f5f5dc",
+    bisque: "#ffe4c4",
+    black: "#000000",
+    blanchedalmond: "#ffebcd",
+    blue: "#0000ff",
+    blueviolet: "#8a2be2",
+    brown: "#a52a2a",
+    burlywood: "#deb887",
+    cadetblue: "#5f9ea0",
+    chartreuse: "#7fff00",
+    chocolate: "#d2691e",
+    coral: "#ff7f50",
+    cornflowerblue: "#6495ed",
+    cornsilk: "#fff8dc",
+    crimson: "#dc143c",
+    cyan: "#00ffff",
+    darkblue: "#00008b",
+    darkcyan: "#008b8b",
+    darkgoldenrod: "#b8860b",
+    darkgray: "#a9a9a9",
+    darkgreen: "#006400",
+    darkgrey: "#a9a9a9",
+    darkkhaki: "#bdb76b",
+    darkmagenta: "#8b008b",
+    darkolivegreen: "#556b2f",
+    darkorange: "#ff8c00",
+    darkorchid: "#9932cc",
+    darkred: "#8b0000",
+    darksalmon: "#e9967a",
+    darkseagreen: "#8fbc8f",
+    darkslateblue: "#483d8b",
+    darkslategray: "#2f4f4f",
+    darkslategrey: "#2f4f4f",
+    darkturquoise: "#00ced1",
+    darkviolet: "#9400d3",
+    deeppink: "#ff1493",
+    deepskyblue: "#00bfff",
+    dimgray: "#696969",
+    dimgrey: "#696969",
+    dodgerblue: "#1e90ff",
+    firebrick: "#b22222",
+    floralwhite: "#fffaf0",
+    forestgreen: "#228b22",
+    fuchsia: "#ff00ff",
+    gainsboro: "#dcdcdc",
+    ghostwhite: "#f8f8ff",
+    gold: "#ffd700",
+    goldenrod: "#daa520",
+    gray: "#808080",
+    green: "#008000",
+    greenyellow: "#adff2f",
+    grey: "#808080",
+    honeydew: "#f0fff0",
+    hotpink: "#ff69b4",
+    indianred: "#cd5c5c",
+    indigo: "#4b0082",
+    ivory: "#fffff0",
+    khaki: "#f0e68c",
+    lavender: "#e6e6fa",
+    lavenderblush: "#fff0f5",
+    lawngreen: "#7cfc00",
+    lemonchiffon: "#fffacd",
+    lightblue: "#add8e6",
+    lightcoral: "#f08080",
+    lightcyan: "#e0ffff",
+    lightgoldenrodyellow: "#fafad2",
+    lightgray: "#d3d3d3",
+    lightgreen: "#90ee90",
+    lightgrey: "#d3d3d3",
+    lightpink: "#ffb6c1",
+    lightsalmon: "#ffa07a",
+    lightseagreen: "#20b2aa",
+    lightskyblue: "#87cefa",
+    lightslategray: "#778899",
+    lightslategrey: "#778899",
+    lightsteelblue: "#b0c4de",
+    lightyellow: "#ffffe0",
+    lime: "#00ff00",
+    limegreen: "#32cd32",
+    linen: "#faf0e6",
+    magenta: "#ff00ff",
+    maroon: "#800000",
+    mediumaquamarine: "#66cdaa",
+    mediumblue: "#0000cd",
+    mediumorchid: "#ba55d3",
+    mediumpurple: "#9370db",
+    mediumseagreen: "#3cb371",
+    mediumslateblue: "#7b68ee",
+    mediumspringgreen: "#00fa9a",
+    mediumturquoise: "#48d1cc",
+    mediumvioletred: "#c71585",
+    midnightblue: "#191970",
+    mintcream: "#f5fffa",
+    mistyrose: "#ffe4e1",
+    moccasin: "#ffe4b5",
+    navajowhite: "#ffdead",
+    navy: "#000080",
+    oldlace: "#fdf5e6",
+    olive: "#808000",
+    olivedrab: "#6b8e23",
+    orange: "#ffa500",
+    orangered: "#ff4500",
+    orchid: "#da70d6",
+    palegoldenrod: "#eee8aa",
+    palegreen: "#98fb98",
+    paleturquoise: "#afeeee",
+    palevioletred: "#db7093",
+    papayawhip: "#ffefd5",
+    peachpuff: "#ffdab9",
+    peru: "#cd853f",
+    pink: "#ffc0cb",
+    plum: "#dda0dd",
+    powderblue: "#b0e0e6",
+    purple: "#800080",
+    rebeccapurple: "#663399",
+    red: "#ff0000",
+    rosybrown: "#bc8f8f",
+    royalblue: "#4169e1",
+    saddlebrown: "#8b4513",
+    salmon: "#fa8072",
+    sandybrown: "#f4a460",
+    seagreen: "#2e8b57",
+    seashell: "#fff5ee",
+    sienna: "#a0522d",
+    silver: "#c0c0c0",
+    skyblue: "#87ceeb",
+    slateblue: "#6a5acd",
+    slategray: "#708090",
+    slategrey: "#708090",
+    snow: "#fffafa",
+    springgreen: "#00ff7f",
+    steelblue: "#4682b4",
+    tan: "#d2b48c",
+    teal: "#008080",
+    thistle: "#d8bfd8",
+    tomato: "#ff6347",
+    turquoise: "#40e0d0",
+    violet: "#ee82ee",
+    wheat: "#f5deb3",
+    white: "#ffffff",
+    whitesmoke: "#f5f5f5",
+    yellow: "#ffff00",
+    yellowgreen: "#9acd32"
+  };
+
+  // src/color/parse.js
+  function alphaOf(v) {
+    if (v == null) return 1;
+    v = String(v).trim();
+    if (v === "") return 1;
+    var a = v.indexOf("%") !== -1 ? parseFloat(v) / 100 : parseFloat(v);
+    return isNaN(a) ? 1 : a;
   }
-
-  function hue2rgb(p, q, t) {
-    if (t < 0) t += 1;
-    if (t > 1) t -= 1;
-    if (t < 1 / 6) return p + (q - p) * 6 * t;
-    if (t < 1 / 2) return q;
-    if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
-    return p;
+  function chan(v) {
+    if (v === "none") return 0;
+    return v.indexOf("%") !== -1 ? Math.round(parseFloat(v) * 2.55) : Math.round(parseFloat(v));
   }
-
-  function hslToRgb(h, s, l) {
-    h /= 360; s /= 100; l /= 100;
-    var r, g, b;
-    if (s === 0) { r = g = b = l; }
-    else {
-      var q = l < 0.5 ? l * (1 + s) : l + s - l * s;
-      var p = 2 * l - q;
-      r = hue2rgb(p, q, h + 1 / 3);
-      g = hue2rgb(p, q, h);
-      b = hue2rgb(p, q, h - 1 / 3);
-    }
-    return [Math.round(r * 255), Math.round(g * 255), Math.round(b * 255)];
-  }
-
-  // Soglia sotto la quale un colore e' considerato "neutro" (bianco/nero/grigio,
-  // non un colore d'accento come un bottone blu o un badge). Per i neutri
-  // forziamo SEMPRE lo stesso nero/grigio, cosi' pannelli/sidebar/sfondo
-  // risultano coerenti fra loro e fra siti diversi (richiesta utente: "i neri
-  // e i grigi sono differenti, non possono essere tutti uguali?"). I colori
-  // d'accento (bottoni, badge, alert) restano invece rimappati preservando
-  // tinta/saturazione, per non perdere il loro significato visivo.
-  var NEUTRAL_S = 8;
-
-  // Rimappa un colore in base al ruolo: "bg" (sfondo), "fg" (testo), "br" (bordo)
-  function remap(rgb, kind) {
-    var hsl = rgbToHsl(rgb.r, rgb.g, rgb.b);
-    var a = (rgb.a === undefined) ? 1 : rgb.a;
-    var neutral = hsl.s <= NEUTRAL_S;
-    var L;
-    if (kind === "bg") {
-      if (neutral) { hsl.s = 0; L = 8; }          // stesso nero ovunque: rgb(20,20,20), come il base css
-      // Colori d'accento (selezione, badge, bottoni): banda 14-30, piu' chiara
-      // e staccata dal nero neutro (8), altrimenti un accento chiaro (es. la
-      // riga selezionata in un client email) finisce quasi indistinguibile
-      // dal resto - perdendo la sua funzione di evidenziazione.
-      else { L = 14 + (100 - hsl.l) * 0.16; if (hsl.s > 65) hsl.s = 65; }
-    } else if (kind === "fg") {
-      L = 96 - hsl.l * 0.24;                     // testi: banda chiara 72-96
+  function parseHex(str) {
+    var h = str.replace(/^#/, "");
+    if (!/^[0-9a-fA-F]+$/.test(h)) return null;
+    var r, g, b, a = 1;
+    if (h.length === 3 || h.length === 4) {
+      r = parseInt(h[0] + h[0], 16);
+      g = parseInt(h[1] + h[1], 16);
+      b = parseInt(h[2] + h[2], 16);
+      if (h.length === 4) a = parseInt(h[3] + h[3], 16) / 255;
+    } else if (h.length === 6 || h.length === 8) {
+      r = parseInt(h.slice(0, 2), 16);
+      g = parseInt(h.slice(2, 4), 16);
+      b = parseInt(h.slice(4, 6), 16);
+      if (h.length === 8) a = parseInt(h.slice(6, 8), 16) / 255;
     } else {
-      if (neutral) { hsl.s = 0; L = 33; }         // stesso grigio ovunque per i bordi neutri
-      else { L = 26 + (100 - hsl.l) * 0.14; }     // bordi colorati: grigi medi discreti
+      return null;
     }
-    var out = hslToRgb(hsl.h, hsl.s, L);
-    return "rgba(" + out[0] + "," + out[1] + "," + out[2] + "," + a + ")";
+    return { r, g, b, a };
+  }
+  function parseRgb(inner) {
+    var slash = inner.split("/");
+    var body = slash[0];
+    var a = slash.length > 1 ? alphaOf(slash[1]) : 1;
+    var parts = body.trim().split(/[\s,]+/).filter(Boolean);
+    if (parts.length < 3) return null;
+    if (slash.length === 1 && parts.length >= 4) a = alphaOf(parts[3]);
+    var r = chan(parts[0]), g = chan(parts[1]), b = chan(parts[2]);
+    if (isNaN(r) || isNaN(g) || isNaN(b)) return null;
+    return { r, g, b, a };
+  }
+  function parseHsl(inner) {
+    var slash = inner.split("/");
+    var body = slash[0];
+    var a = slash.length > 1 ? alphaOf(slash[1]) : 1;
+    var parts = body.trim().split(/[\s,]+/).filter(Boolean);
+    if (parts.length < 3) return null;
+    if (slash.length === 1 && parts.length >= 4) a = alphaOf(parts[3]);
+    var h = parseFloat(parts[0]);
+    var s = parseFloat(parts[1]);
+    var l = parseFloat(parts[2]);
+    if (isNaN(h) || isNaN(s) || isNaN(l)) return null;
+    var rgb = hslToRgb(h, s, l);
+    return { r: rgb[0], g: rgb[1], b: rgb[2], a };
+  }
+  function parseColor(str) {
+    if (!str) return null;
+    str = String(str).trim();
+    if (!str) return null;
+    var low = str.toLowerCase();
+    if (low === "transparent") return { r: 0, g: 0, b: 0, a: 0 };
+    if (low === "currentcolor" || low === "inherit" || low === "initial" || low === "unset" || low === "revert" || low === "none") return null;
+    if (str.charAt(0) === "#") return parseHex(str);
+    var m = str.match(/^rgba?\(([^)]+)\)$/i);
+    if (m) return parseRgb(m[1]);
+    var h = str.match(/^hsla?\(([^)]+)\)$/i);
+    if (h) return parseHsl(h[1]);
+    var o = str.match(/^oklch\(([^)]+)\)$/i);
+    if (o) return oklchToRgb(o[1]);
+    var k = str.match(/^color\(\s*(srgb|display-p3)\s+([^)]+)\)$/i);
+    if (k) return colorFuncToRgb(k[1].toLowerCase(), k[2]);
+    if (Object.prototype.hasOwnProperty.call(NAMED, low)) return parseHex(NAMED[low]);
+    return null;
   }
 
-  /* ---------- Motore: applica/rimuove il tema ---------- */
-  function baseCSS() {
-    // color-scheme:dark rende scuri anche i controlli nativi (checkbox, select,
-    // scrollbar) che ignorano il background-color -> niente riquadri bianchi.
-    // Se pero' il sito personalizza la scrollbar con ::-webkit-scrollbar (uno
-    // pseudo-elemento CSS, non un vero nodo del DOM) quello vince sempre e
-    // color-scheme non basta (bug: scrollbar rimasta chiara su Outlook Web).
-    // La sovrascriviamo esplicitamente qui. Il selettore universale "*" pero'
-    // ha specificita' bassissima: se il sito usa una regola con una classe
-    // dedicata (es. Outlook Web: ".customScrollBar::-webkit-scrollbar-thumb"),
-    // a parita' di !important vince chi e' piu' specifico, non noi (bug
-    // capitato: scrollbar rimasta chiara anche dopo il primo fix). "SEL" e'
-    // un trucco per alzare la nostra specificita' al livello di un ID senza
-    // escludere nulla per davvero (l'ID non esiste mai).
-    var SEL = ":not(#__notte_never__)";
-    // NOTA: su Safari/macOS la personalizzazione del colore della scrollbar
-    // (::-webkit-scrollbar-thumb / scrollbar-color) risulta inefficace anche
-    // dopo aver provato scrollbar classiche invece di overlay e aver tolto
-    // color-scheme:dark dalle regole universali: e' un limite della
-    // piattaforma (algoritmo interno di WebKit per il colore della scrollbar
-    // overlay, correlato al bug pubblico bugs.webkit.org/show_bug.cgi?id=213394),
-    // non risolvibile da CSS iniettato da un'estensione. Su Chrome/Firefox le
-    // regole sotto funzionano correttamente e vanno mantenute cosi'.
-    // NB: quel limite riguarda la scrollbar NATIVA (overlay) di Safari. Le
-    // scrollbar CUSTOM disegnate dal sito via ::-webkit-scrollbar (es. Outlook
-    // Web) su Safari si rendono eccome, e li' le nostre regole si applicano —
-    // vedi il commento "filetti bianchi" piu' sotto.
-    return "html{color-scheme:dark !important;}" +
-           // "color-scheme" e' ereditato: se un discendente dichiara il PROPRIO
-           // valore (es. "color-scheme:light" su un contenitore con scroll,
-           // tecnica comune per forzare scrollbar/controlli chiari a
-           // prescindere dal tema del sistema) quella dichiarazione vince
-           // sempre sull'antenato, !important o no - l'ereditarieta' si applica
-           // solo in ASSENZA di una regola propria sull'elemento. Per questo
-           // "html{color-scheme:dark}" da solo non basta (bug: scrollbar
-           // nativa rimasta chiara su Outlook Web). La regola universale qui
-           // sotto intercetta OGNI elemento, non solo html.
-           "*" + SEL + "{color-scheme:dark !important;}" +
-           "html,body{background-color:#141414 !important;}" +
-           "input,textarea,select{color-scheme:dark;}" +
-           "*{scrollbar-color:#5a5a5a #1a1a1a;}" +
-           // IMPORTANTE (bug Safari, "filetti bianchi" attorno alla scrollbar):
-           // su Chrome 121+ la proprieta' standard `scrollbar-color` qui sopra
-           // VINCE sull'intero blocco ::-webkit-scrollbar-* (le regole webkit
-           // del sito vengono ignorate del tutto), quindi bordi/ombre bianchi
-           // del sito non si vedono mai. Safari invece usa ancora il percorso
-           // legacy ::-webkit-scrollbar: noi sovrascrivevamo solo `background`,
-           // ma NON border/box-shadow — il thumb/track custom di Outlook Web
-           // (".customScrollBar") ha un bordo bianco che restava visibile SOLO
-           // su Safari. Per questo ogni regola qui sotto azzera anche
-           // border/box-shadow/outline, e copriamo pure -track-piece e -button.
-           "*" + SEL + "::-webkit-scrollbar,*" + SEL + "::-webkit-scrollbar-corner{background:#1a1a1a !important;border:0 !important;box-shadow:none !important;outline:none !important;}" +
-           "*" + SEL + "::-webkit-scrollbar-track,*" + SEL + "::-webkit-scrollbar-track-piece,*" + SEL + "::-webkit-scrollbar-button{background:#1a1a1a !important;border:0 !important;box-shadow:none !important;outline:none !important;}" +
-           "*" + SEL + "::-webkit-scrollbar-thumb{background:#5a5a5a !important;border-radius:8px;border:0 !important;box-shadow:none !important;outline:none !important;}" +
-           // Consumano le CSS variable messe inline da applyPseudo(): scuriscono
-           // i ::before/::after con sfondo chiaro (irraggiungibili dal walk).
-           "[data-notte-before]" + SEL + "::before{background-color:var(--notte-before-bg,#141414) !important;background-image:none !important;}" +
-           "[data-notte-after]" + SEL + "::after{background-color:var(--notte-after-bg,#141414) !important;background-image:none !important;}" +
-           // Bordi chiari dei pseudo-elementi, un attributo/variabile per LATO
-           // (mai lo shorthand border-color: annullerebbe i lati trasparenti
-           // dei triangoli/caret CSS). Vedi applyPseudo().
-           "[data-notte-before-bt]" + SEL + "::before{border-top-color:var(--notte-before-bt) !important;}" +
-           "[data-notte-before-br]" + SEL + "::before{border-right-color:var(--notte-before-br) !important;}" +
-           "[data-notte-before-bb]" + SEL + "::before{border-bottom-color:var(--notte-before-bb) !important;}" +
-           "[data-notte-before-bl]" + SEL + "::before{border-left-color:var(--notte-before-bl) !important;}" +
-           "[data-notte-after-bt]" + SEL + "::after{border-top-color:var(--notte-after-bt) !important;}" +
-           "[data-notte-after-br]" + SEL + "::after{border-right-color:var(--notte-after-br) !important;}" +
-           "[data-notte-after-bb]" + SEL + "::after{border-bottom-color:var(--notte-after-bb) !important;}" +
-           "[data-notte-after-bl]" + SEL + "::after{border-left-color:var(--notte-after-bl) !important;}" +
-           // Rimedio best-effort per gli stati :hover/:focus puramente CSS (nessuna
-           // mutazione DOM, quindi invisibili al nostro walk/observer basato su JS):
-           // alcuni siti mostrano un lampo bianco al passaggio del mouse tramite
-           // background-image/filter invece che background-color (che gia'
-           // controlliamo). Non tocchiamo background-color qui per non annullare
-           // gli hover colorati intenzionali (bottoni, badge...).
-           "*:hover,*:focus{background-image:none !important;filter:none !important;backdrop-filter:none !important;}" +
-           // Idem per gli highlight di hover disegnati dai pseudo-elementi
-           // (gradienti/immagini chiare che compaiono solo su :hover, fuori
-           // dalla portata del walk): spegniamo il background-image, il
-           // background-color eventuale resta e viene gestito da hoverProtect.
-           "*:hover::before,*:hover::after{background-image:none !important;filter:none !important;}";
+  // src/color/remap.js
+  var AA_BG = { r: 44, g: 44, b: 44 };
+  var AA_MIN = 4.5;
+  function clamp(x, lo, hi) {
+    return x < lo ? lo : x > hi ? hi : x;
   }
-  // root puo' essere il document principale o uno shadow root: uno shadow
-  // root NON eredita il <style> messo in document.head (incapsulamento), per
-  // cui le regole di sfondo/scrollbar/color-scheme qui dentro non arrivavano
-  // mai ai pannelli scrollabili dentro shadow DOM (bug: la colorazione
-  // inline di sfondo/testo/bordo funzionava lì dentro perche' walk() la
-  // applica elemento per elemento, ma le regole scrollbar - che vivono solo
-  // in questo <style> - no). Iniettiamo quindi una copia dello stesso
-  // <style> in OGNI shadow root, non solo nel documento principale.
+  function dampS(s) {
+    s = s * 0.7;
+    if (s > 45) s = 45 + (s - 45) * 0.5;
+    return s;
+  }
+  function remap(rgb, kind, theme) {
+    var hsl = rgbToHsl(rgb.r, rgb.g, rgb.b);
+    var a = rgb.a === void 0 ? 1 : rgb.a;
+    var H = hsl.h, origS = hsl.s, L = hsl.l, Lp;
+    var accent = origS > 40;
+    var S = dampS(origS);
+    if (kind === "bg") {
+      if (accent) {
+        S = Math.min(origS * 0.85, 85);
+        Lp = clamp(28 + (100 - L) * 0.05, 26, 40);
+      } else {
+        Lp = L >= 85 ? 11 + (100 - L) * 0.45 : 11 + L * 0.0794;
+      }
+    } else if (kind === "fg") {
+      var target = AA_MIN;
+      if (accent) {
+        S = Math.min(origS * 0.92, 92);
+        target = 3;
+      }
+      Lp = Math.max(L, 90 - L * 0.6);
+      var out = hslToRgb(H, S, Lp), guard = 0;
+      while (contrastRatio({ r: out[0], g: out[1], b: out[2] }, AA_BG) < target && Lp < 97 && guard < 64) {
+        Lp += 1.5;
+        out = hslToRgb(H, S, Lp);
+        guard++;
+      }
+      return "rgba(" + out[0] + "," + out[1] + "," + out[2] + "," + a + ")";
+    } else {
+      if (accent) {
+        S = Math.min(origS * 0.9, 90);
+        Lp = clamp(Math.max(L, 55), 50, 68);
+      } else {
+        Lp = clamp(45 - L * 0.2, 22, 46);
+        S = S * 0.8;
+      }
+    }
+    var rgbOut = hslToRgb(H, S, Lp);
+    return "rgba(" + rgbOut[0] + "," + rgbOut[1] + "," + rgbOut[2] + "," + a + ")";
+  }
+  function remapAuto(rgb, theme) {
+    var kind = luminance(rgb) >= 128 ? "bg" : "fg";
+    return remap(rgb, kind, theme);
+  }
+  function remapShadow(rgb, theme) {
+    var a = rgb.a === void 0 ? 1 : rgb.a;
+    if (luminance(rgb) >= 140) return remap(rgb, "bg", theme);
+    return "rgba(" + rgb.r + "," + rgb.g + "," + rgb.b + "," + a + ")";
+  }
+
+  // src/css/values.js
+  var IDENT_START = /[a-zA-Z]/;
+  var IDENT_CH = /[a-zA-Z0-9_\-]/;
+  var HEX = /[0-9a-fA-F]/;
+  var COLOR_FUNCS = { rgb: 1, rgba: 1, hsl: 1, hsla: 1, oklch: 1, oklab: 1, color: 1, lab: 1, lch: 1, hwb: 1 };
+  function remapByRole(c, role, theme) {
+    if (role === "auto") return remapAuto(c, theme);
+    if (role === "shadow") return remapShadow(c, theme);
+    return remap(c, role, theme);
+  }
+  function matchParen(str, open) {
+    var depth = 0;
+    for (var i = open; i < str.length; i++) {
+      var ch = str[i];
+      if (ch === "(") depth++;
+      else if (ch === ")") {
+        depth--;
+        if (depth === 0) return i;
+      }
+    }
+    return str.length - 1;
+  }
+  function topLevelComma(s) {
+    var d = 0;
+    for (var i = 0; i < s.length; i++) {
+      var c = s[i];
+      if (c === "(") d++;
+      else if (c === ")") d--;
+      else if (c === "," && d === 0) return i;
+    }
+    return -1;
+  }
+  function parseChannelTriplet(value) {
+    if (!value) return null;
+    var chan2 = value.trim().match(/^(\d{1,3})[ ,]+(\d{1,3})[ ,]+(\d{1,3})(?:\s*\/\s*([0-9.]+%?))?$/);
+    if (!chan2) return null;
+    var r = +chan2[1], g = +chan2[2], b = +chan2[3];
+    if (r > 255 || g > 255 || b > 255) return null;
+    return { r, g, b, alpha: chan2[4] || null, sep: value.indexOf(",") !== -1 ? ", " : " " };
+  }
+  function channelVariant(chan2, role, theme) {
+    var out = remapByRole({ r: chan2.r, g: chan2.g, b: chan2.b, a: 1 }, role, theme);
+    var mm = out.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/);
+    if (!mm) return null;
+    var res = mm[1] + chan2.sep + mm[2] + chan2.sep + mm[3];
+    if (chan2.alpha) res += " / " + chan2.alpha;
+    return res;
+  }
+  function transformVarDef(value, theme) {
+    var chan2 = parseChannelTriplet(value);
+    if (chan2) {
+      var res = channelVariant(chan2, "auto", theme);
+      if (res) return res;
+    }
+    return transformValue(value, "auto", theme);
+  }
+  function transformValue(value, role, theme) {
+    if (!value) return value;
+    if (value.indexOf("(") === -1 && value.indexOf("#") === -1 && !/[a-zA-Z]/.test(value)) {
+      return value;
+    }
+    var out = "";
+    var i = 0;
+    var n = value.length;
+    var changed = false;
+    while (i < n) {
+      var ch = value[i];
+      if (ch === "#") {
+        var j = i + 1;
+        while (j < n && HEX.test(value[j])) j++;
+        var hexLen = j - (i + 1);
+        if (hexLen === 3 || hexLen === 4 || hexLen === 6 || hexLen === 8) {
+          var hc = parseColor(value.slice(i, j));
+          if (hc) {
+            out += remapByRole(hc, role, theme);
+            i = j;
+            changed = true;
+            continue;
+          }
+        }
+        out += ch;
+        i++;
+        continue;
+      }
+      if (IDENT_START.test(ch)) {
+        var k = i;
+        while (k < n && IDENT_CH.test(value[k])) k++;
+        var name = value.slice(i, k);
+        if (value[k] === "(") {
+          var close = matchParen(value, k);
+          var whole = value.slice(i, close + 1);
+          var lname = name.toLowerCase();
+          if (lname === "url") {
+            out += whole;
+            i = close + 1;
+            continue;
+          }
+          if (lname === "var") {
+            // Keep the variable name; remap color literals in the fallback (the
+            // part after the first top-level comma), e.g. var(--x,#fff) ->
+            // var(--x,<dark>). Fixes LightningCSS/Tailwind light-dark() surfaces.
+            var vinner = value.slice(k + 1, close);
+            var cpos = topLevelComma(vinner);
+            if (cpos === -1) {
+              out += whole;
+            } else {
+              var vfb = vinner.slice(cpos + 1);
+              var tvf = transformValue(vfb, role, theme);
+              if (tvf !== vfb) changed = true;
+              out += "var(" + vinner.slice(0, cpos + 1) + tvf + ")";
+            }
+            i = close + 1;
+            continue;
+          }
+          if (COLOR_FUNCS[lname]) {
+            var fc = parseColor(whole);
+            if (fc) {
+              out += remapByRole(fc, role, theme);
+              i = close + 1;
+              changed = true;
+              continue;
+            }
+            out += whole;
+            i = close + 1;
+            continue;
+          }
+          var inner = value.slice(k + 1, close);
+          var t = transformValue(inner, role, theme);
+          if (t !== inner) changed = true;
+          out += name + "(" + t + ")";
+          i = close + 1;
+          continue;
+        }
+        var nc = parseColor(name.toLowerCase());
+        if (nc) {
+          out += remapByRole(nc, role, theme);
+          i = k;
+          changed = true;
+          continue;
+        }
+        out += name;
+        i = k;
+        continue;
+      }
+      out += ch;
+      i++;
+    }
+    return changed ? out : value;
+  }
+
+  // src/css/rules.js
+  var EMPTY = { has: function() {
+    return false;
+  } };
+  function roleFor(prop, masked) {
+    switch (prop) {
+      case "color":
+      case "text-decoration-color":
+      case "-webkit-text-fill-color":
+      case "caret-color":
+      case "text-emphasis-color":
+        return "fg";
+      case "background-color":
+        return masked ? "fg" : "bg";
+      case "background":
+      case "background-image":
+        return "bg";
+      case "border-color":
+      case "border-top-color":
+      case "border-right-color":
+      case "border-bottom-color":
+      case "border-left-color":
+      case "border-block-color":
+      case "border-block-start-color":
+      case "border-block-end-color":
+      case "border-inline-color":
+      case "border-inline-start-color":
+      case "border-inline-end-color":
+      case "border":
+      case "border-top":
+      case "border-right":
+      case "border-bottom":
+      case "border-left":
+      case "outline":
+      case "outline-color":
+      case "column-rule-color":
+        return "br";
+      case "box-shadow":
+      case "-webkit-box-shadow":
+        return "shadow";
+      default:
+        if (prop.length > 2 && prop[0] === "-" && prop[1] === "-") return "auto";
+        return null;
+    }
+  }
+  function variantName(role, name) {
+    return "--nt-" + role + name;
+  }
+  function firstVarRef(value) {
+    var m = value && value.match(/var\(\s*(--[A-Za-z0-9_-]+)/);
+    return m ? m[1] : null;
+  }
+  function rewriteVars(value, role, colorVars) {
+    if (!value || value.indexOf("var(") === -1) return value;
+    var short = role === "shadow" ? "bg" : role;
+    return value.replace(/var\(\s*(--[A-Za-z0-9_-]+)/g, function(m, name) {
+      return colorVars.has(name) ? "var(" + variantName(short, name) : m;
+    });
+  }
+  function splitDecls(css) {
+    var res = [], depth = 0, buf = "";
+    for (var i = 0; i < css.length; i++) {
+      var ch = css[i];
+      if (ch === "(") depth++;
+      else if (ch === ")") depth--;
+      if (ch === ";" && depth === 0) {
+        res.push(buf);
+        buf = "";
+      } else buf += ch;
+    }
+    if (buf.trim()) res.push(buf);
+    var out = [];
+    for (var j = 0; j < res.length; j++) {
+      var d = res[j], idx = d.indexOf(":");
+      if (idx === -1) continue;
+      out.push({ prop: d.slice(0, idx).trim(), value: d.slice(idx + 1).replace(/!important/i, "").trim() });
+    }
+    return out;
+  }
+  function transformDeclaration(style, theme, colorVars) {
+    if (!style) return [];
+    colorVars = colorVars || EMPTY;
+    var mi = style.getPropertyValue("mask-image") || style.getPropertyValue("-webkit-mask-image");
+    var masked = !!mi && mi !== "none";
+    var decls = [];
+    var emitted = {};
+    for (var i = 0; i < style.length; i++) {
+      var prop = style[i];
+      var role = roleFor(prop, masked);
+      if (role === null) continue;
+      var value = style.getPropertyValue(prop);
+      if (!value) continue;
+      if (role === "auto") {
+        var val = value.trim();
+        var c = parseColor(val);
+        var chan2 = c ? null : parseChannelTriplet(val);
+        if (c) {
+          decls.push(variantName("bg", prop) + ":" + remap(c, "bg", theme) + " !important");
+          decls.push(variantName("fg", prop) + ":" + remap(c, "fg", theme) + " !important");
+          decls.push(variantName("br", prop) + ":" + remap(c, "br", theme) + " !important");
+        } else if (chan2) {
+          var vb = channelVariant(chan2, "bg", theme), vf = channelVariant(chan2, "fg", theme), vr = channelVariant(chan2, "br", theme);
+          if (vb) decls.push(variantName("bg", prop) + ":" + vb + " !important");
+          if (vf) decls.push(variantName("fg", prop) + ":" + vf + " !important");
+          if (vr) decls.push(variantName("br", prop) + ":" + vr + " !important");
+          var ip = transformVarDef(value, theme);
+          if (ip !== value) decls.push(prop + ":" + ip + " !important");
+        } else {
+          var ref = firstVarRef(val);
+          if (ref && colorVars.has(ref)) {
+            decls.push(variantName("bg", prop) + ":" + rewriteVars(val, "bg", colorVars) + " !important");
+            decls.push(variantName("fg", prop) + ":" + rewriteVars(val, "fg", colorVars) + " !important");
+            decls.push(variantName("br", prop) + ":" + rewriteVars(val, "br", colorVars) + " !important");
+          } else {
+            var outv = transformVarDef(value, theme);
+            if (outv !== value) decls.push(prop + ":" + outv + " !important");
+          }
+        }
+        continue;
+      }
+      var out = transformValue(value, role, theme);
+      out = rewriteVars(out, role, colorVars);
+      if (out !== value) {
+        decls.push(prop + ":" + out + " !important");
+        emitted[prop] = 1;
+      }
+    }
+    var css = style.cssText;
+    if (css && css.indexOf("var(") !== -1) {
+      var parsed = splitDecls(css);
+      for (var k = 0; k < parsed.length; k++) {
+        var p2 = parsed[k].prop, v2 = parsed[k].value;
+        var r2 = roleFor(p2, masked);
+        if (r2 === null || r2 === "auto") continue;
+        if (v2.indexOf("var(") === -1) continue;
+        if (emitted[p2]) continue;
+        var o2 = rewriteVars(transformValue(v2, r2, theme), r2, colorVars);
+        if (o2 !== v2) decls.push(p2 + ":" + o2 + " !important");
+      }
+    }
+    return decls;
+  }
+  var SVG_TEXT_TAGS = { text: 1, tspan: 1, textpath: 1 };
+  function svgPaintRole(el, attr) {
+    if (attr === "stroke") return "br";
+    if (attr === "fill") {
+      var t = el.tagName ? el.tagName.toLowerCase() : "";
+      return SVG_TEXT_TAGS[t] ? "fg" : "bg";
+    }
+    return "bg";
+  }
+  var SVG_PAINT_ATTRS = ["fill", "stroke", "stop-color", "flood-color", "lighting-color"];
+  function transformSvgPaints(el, colorVars) {
+    if (!el || !el.getAttribute) return [];
+    colorVars = colorVars || EMPTY;
+    var out = [];
+    for (var i = 0; i < SVG_PAINT_ATTRS.length; i++) {
+      var attr = SVG_PAINT_ATTRS[i];
+      var v = el.getAttribute(attr);
+      if (!v || v.indexOf("var(") === -1) continue;
+      var rw = rewriteVars(v, svgPaintRole(el, attr), colorVars);
+      if (rw !== v) out.push(attr + ":" + rw + " !important");
+    }
+    return out;
+  }
+  function transformHtmlColorAttrs(el, theme, colorVars) {
+    if (!el || !el.getAttribute) return [];
+    colorVars = colorVars || EMPTY;
+    var out = [];
+    var tag = el.tagName;
+    if (tag === "FONT") pushAttr(el, "color", "color", "fg", theme, colorVars, out);
+    pushAttr(el, "bgcolor", "background-color", "bg", theme, colorVars, out);
+    return out;
+  }
+  function pushAttr(el, attr, prop, role, theme, colorVars, out) {
+    var v = el.getAttribute(attr);
+    if (!v) return;
+    v = v.trim();
+    if (v.indexOf("var(") !== -1) {
+      var rw = rewriteVars(v, role, colorVars);
+      if (rw !== v) out.push(prop + ":" + rw + " !important");
+    } else {
+      var c = parseColor(v);
+      if (c) out.push(prop + ":" + remap(c, role, theme) + " !important");
+    }
+  }
+  function collectInlineVarDefs(root, map) {
+    var list;
+    try {
+      list = root.querySelectorAll("[style]");
+    } catch (e) {
+      return;
+    }
+    for (var i = 0; i < list.length; i++) {
+      var st = list[i].style;
+      if (!st || !st.length) continue;
+      for (var j = 0; j < st.length; j++) {
+        var p = st[j];
+        if (p.length > 2 && p[0] === "-" && p[1] === "-" && p.indexOf("--nt-") !== 0) {
+          if (map[p] === void 0) map[p] = st.getPropertyValue(p);
+        }
+      }
+    }
+  }
+  function collectVarDefs(rules, map) {
+    if (!rules) return;
+    for (var i = 0; i < rules.length; i++) {
+      try {
+        var rule = rules[i];
+        if (rule.style && rule.selectorText !== void 0) {
+          var st = rule.style;
+          for (var j = 0; j < st.length; j++) {
+            var p = st[j];
+            if (p.length > 2 && p[0] === "-" && p[1] === "-") map[p] = st.getPropertyValue(p);
+          }
+          if (rule.cssRules && rule.cssRules.length) collectVarDefs(rule.cssRules, map);
+        } else if (rule.styleSheet) {
+          try {
+            if (rule.styleSheet.cssRules) collectVarDefs(rule.styleSheet.cssRules, map);
+          } catch (e) {
+          }
+        } else if (rule.cssRules) {
+          collectVarDefs(rule.cssRules, map);
+        }
+      } catch (e) {
+      }
+    }
+  }
+  function resolveColorVars(map) {
+    var set = /* @__PURE__ */ new Set();
+    var name;
+    for (name in map) {
+      var v = map[name] && String(map[name]).trim();
+      if (v && (parseColor(v) || parseChannelTriplet(v))) set.add(name);
+    }
+    var changed = true;
+    while (changed) {
+      changed = false;
+      for (name in map) {
+        if (set.has(name)) continue;
+        var ref = firstVarRef(String(map[name] || ""));
+        if (ref && set.has(ref)) {
+          set.add(name);
+          changed = true;
+        }
+      }
+    }
+    return set;
+  }
+  function transformStyleRule(rule, theme, colorVars) {
+    if (!rule.selectorText) return "";
+    var decls = transformDeclaration(rule.style, theme, colorVars);
+    if (!decls.length) return "";
+    return rule.selectorText + "{" + decls.join(";") + "}";
+  }
+  function walkRules(rules, theme, ctx) {
+    if (!rules) return;
+    for (var idx = 0; idx < rules.length; idx++) {
+      try {
+        handleRule(rules[idx], theme, ctx);
+      } catch (e) {
+      }
+    }
+  }
+  function handleRule(rule, theme, ctx) {
+    var cn = rule.constructor && rule.constructor.name || "";
+    if (cn === "CSSKeyframesRule") return;
+    if (rule.selectorText !== void 0 && rule.style) {
+      var text = transformStyleRule(rule, theme, ctx.colorVars);
+      if (text) ctx.out.push(text);
+      if (rule.cssRules && rule.cssRules.length) {
+        var sub = { out: [], cors: ctx.cors, colorVars: ctx.colorVars };
+        walkRules(rule.cssRules, theme, sub);
+        if (sub.out.length) ctx.out.push(rule.selectorText + "{" + sub.out.join("") + "}");
+      }
+      return;
+    }
+    if (rule.styleSheet !== void 0 && rule.href) {
+      var nested = null;
+      try {
+        nested = rule.styleSheet && rule.styleSheet.cssRules;
+      } catch (e) {
+        nested = null;
+      }
+      if (nested) walkRules(nested, theme, ctx);
+      else ctx.cors.push(rule.href);
+      return;
+    }
+    if (rule.cssRules) {
+      var sub2 = { out: [], cors: ctx.cors, colorVars: ctx.colorVars };
+      walkRules(rule.cssRules, theme, sub2);
+      if (!sub2.out.length) return;
+      var inner = sub2.out.join("");
+      if (cn === "CSSMediaRule" && rule.media) {
+        ctx.out.push("@media " + rule.media.mediaText + "{" + inner + "}");
+      } else if (cn === "CSSSupportsRule" && rule.conditionText !== void 0) {
+        ctx.out.push("@supports " + rule.conditionText + "{" + inner + "}");
+      } else {
+        ctx.out.push(inner);
+      }
+      return;
+    }
+  }
+
+  // src/sheets/collect.js
+  function collectSheets(root) {
+    var readable = [];
+    var unreadable = [];
+    var seen = readable;
+    function consider(sheet) {
+      if (!sheet || sheet.disabled) return;
+      var owner = sheet.ownerNode;
+      if (owner && owner.getAttribute && owner.getAttribute("data-notte") !== null) return;
+      var rules = null;
+      try {
+        rules = sheet.cssRules;
+      } catch (e) {
+        rules = null;
+      }
+      if (rules) {
+        readable.push(sheet);
+      } else if (sheet.href) {
+        unreadable.push(sheet.href);
+      }
+    }
+    var list = null;
+    try {
+      list = root.styleSheets;
+    } catch (e) {
+      list = null;
+    }
+    if (list) for (var i = 0; i < list.length; i++) consider(list[i]);
+    var adopted = null;
+    try {
+      adopted = root.adoptedStyleSheets;
+    } catch (e) {
+      adopted = null;
+    }
+    if (adopted) for (var j = 0; j < adopted.length; j++) {
+      var s = adopted[j];
+      var owner2 = s && s.ownerNode;
+      if (owner2 && owner2.getAttribute && owner2.getAttribute("data-notte") !== null) continue;
+      if (s && s.__notte) continue;
+      try {
+        if (s.cssRules) readable.push(s);
+      } catch (e) {
+      }
+    }
+    return { readable, unreadable };
+  }
+
+  // src/sheets/cors.js
+  var api = typeof browser !== "undefined" ? browser : chrome;
+  function fetchCssText(hrefs) {
+    return new Promise(function(resolve) {
+      if (!hrefs || !hrefs.length) {
+        resolve([]);
+        return;
+      }
+      try {
+        var p = api.runtime.sendMessage({ type: "notte-fetch-css", hrefs });
+        if (p && typeof p.then === "function") {
+          p.then(function(r) {
+            resolve(r && r.results || []);
+          }).catch(function() {
+            resolve([]);
+          });
+        } else {
+          api.runtime.sendMessage({ type: "notte-fetch-css", hrefs }, function(r) {
+            resolve(r && r.results || []);
+          });
+        }
+      } catch (e) {
+        resolve([]);
+      }
+    });
+  }
+  function parseCssText(text) {
+    try {
+      var sheet = new CSSStyleSheet();
+      sheet.__notte = true;
+      sheet.replaceSync(text);
+      return sheet.cssRules;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  // src/engine/bootstrap.js
+  var FLASH_ID = "__notte_flash__";
+  function coverCSS() {
+    return "html{background-color:#1c1c1c !important;color-scheme:dark !important;}html,body{background-color:#1c1c1c !important;}*{background-color:#1c1c1c !important;color:#dbdbdb !important;}img,picture,video,canvas,svg,image{background-color:transparent !important;}";
+  }
+  function injectAntiFlash(root) {
+    root = root || document;
+    var container = root === document ? document.head || document.documentElement : root;
+    if (!container) return;
+    if (container.querySelector && container.querySelector("#" + FLASH_ID)) return;
+    var el = document.createElement("style");
+    el.id = FLASH_ID;
+    el.setAttribute("data-notte", "");
+    el.textContent = coverCSS();
+    container.appendChild(el);
+  }
+  var NOTRANS_ID = "__notte_notrans__";
+  function injectNoTransition(root) {
+    root = root || document;
+    var container = root === document ? document.head || document.documentElement : root;
+    if (!container) return;
+    if (container.querySelector && container.querySelector("#" + NOTRANS_ID)) return;
+    var el = document.createElement("style");
+    el.id = NOTRANS_ID;
+    el.setAttribute("data-notte", "");
+    el.textContent = "*,*::before,*::after{transition-duration:0s !important;transition-delay:0s !important;animation-duration:0s !important;animation-delay:0s !important;}";
+    container.appendChild(el);
+  }
+  function removeNoTransition(root) {
+    root = root || document;
+    var el = root === document ? document.getElementById(NOTRANS_ID) : root.getElementById ? root.getElementById(NOTRANS_ID) : root.querySelector ? root.querySelector("#" + NOTRANS_ID) : null;
+    if (el && el.parentNode) el.parentNode.removeChild(el);
+  }
+  function removeAntiFlash(root) {
+    root = root || document;
+    var el = null;
+    if (root === document) el = document.getElementById(FLASH_ID);
+    else if (root.getElementById) el = root.getElementById(FLASH_ID);
+    else if (root.querySelector) el = root.querySelector("#" + FLASH_ID);
+    if (el && el.parentNode) el.parentNode.removeChild(el);
+  }
+
+  // src/engine/base.js
+  var BASE_ID = "__notte_base__";
+  function baseCSS() {
+    var SEL = ":not(#__notte_never__)";
+    return "html{color-scheme:dark !important;}*" + SEL + "{color-scheme:dark !important;}html,body{background-color:#141414 !important;}input,textarea,select{color-scheme:dark;}*" + SEL + "{scrollbar-color:#5a5a5a #1a1a1a !important;}*" + SEL + "::-webkit-scrollbar,*" + SEL + "::-webkit-scrollbar-corner{background:#1a1a1a !important;border:0 !important;box-shadow:none !important;outline:none !important;}*" + SEL + "::-webkit-scrollbar-track,*" + SEL + "::-webkit-scrollbar-track-piece,*" + SEL + "::-webkit-scrollbar-button{background:#1a1a1a !important;border:0 !important;box-shadow:none !important;outline:none !important;}*" + SEL + "::-webkit-scrollbar-thumb{background:#5a5a5a !important;border-radius:8px;border:0 !important;box-shadow:none !important;outline:none !important;}";
+  }
+  function containerOf(root) {
+    return root.head || (root.nodeType === 9 ? root.documentElement : root);
+  }
   function ensureBase(root) {
     root = root || document;
-    var container = root.head || root; // document -> <head>; shadow root -> se stesso
+    var container = containerOf(root);
     var el = container.querySelector ? container.querySelector("#" + BASE_ID) : null;
     if (!el) {
       el = document.createElement("style");
       el.id = BASE_ID;
+      el.setAttribute("data-notte", "");
       container.appendChild(el);
     }
     el.textContent = baseCSS();
   }
   function removeBase(root) {
     root = root || document;
-    var container = root.head || root;
+    var container = containerOf(root);
     var el = container.querySelector ? container.querySelector("#" + BASE_ID) : null;
     if (el && el.parentNode) el.parentNode.removeChild(el);
   }
 
-  // Applica (o ri-applica) una singola proprieta' di colore, ma solo se il
-  // valore inline attuale e' diverso da quello che avevamo forzato noi
-  // l'ultima volta. Le web-app complesse (React/Ember/Angular: App Store
-  // Connect, Outlook Web, MeteoSvizzera) a volte ri-scrivono lo stile inline
-  // "originale" di un elemento gia' tematizzato SENZA aggiungere/rimuovere
-  // nodi (quindi invisibile a un MutationObserver in sola modalita' childList)
-  // cancellando cosi' il nostro !important. Confrontando il valore inline
-  // letterale (non getComputedStyle, che rifletterebbe il nostro stesso
-  // output) ci accorgiamo del reset e ri-scuriamo subito, senza pero' ri-
-  // rimappare all'infinito un colore che e' gia' il nostro.
-  function applyColor(el, prop, kind, computedValue) {
-    var key = "__notte_" + prop;
-    var current = el.style.getPropertyValue(prop);
-    if (current && current === el[key]) return; // il nostro override e' ancora attivo, nulla da fare
-    var c = parseColor(computedValue);
-    if (!c || c.a <= 0.05) return;
-    var out = remap(c, kind);
-    el.style.setProperty(prop, out, "important");
-    // IMPORTANTE: salviamo il valore RI-LETTO dopo la scrittura, non la
-    // stringa che abbiamo costruito noi. Il browser normalizza la
-    // serializzazione (es. aggiunge spazi dopo le virgole): se confrontassimo
-    // con la nostra stringa "grezza" il confronto fallirebbe sempre, anche
-    // quando non e' cambiato nulla, causando una riscrittura continua che
-    // ri-genera una mutazione "style" ad ogni giro -> loop infinito che
-    // blocca la pagina (bug capitato: "non riesco piu' a cliccare sui siti").
-    el[key] = el.style.getPropertyValue(prop);
-  }
-
-  // Alcuni pannelli (es. header di App Store Connect) NON usano
-  // background-color ma un GRADIENTE chiaro via background-image: il nostro
-  // override inline di background-color non lo copre, e il pannello restava
-  // bianco con sopra il testo gia' schiarito da noi (illeggibile). Qui, se
-  // l'elemento ha un gradiente i cui colori sono in media CHIARI, lo
-  // spegniamo; se sotto non c'e' un background-color visibile, mettiamo il
-  // nero neutro standard. I gradienti scuri o d'accento (bottoni colorati)
-  // NON vengono toccati, e nemmeno i background-image con url(...) (immagini
-  // vere, es. avatar/loghi: devono restare come le foto).
-  // Decide se un gradiente CSS e' "chiaro" e va spento (elementi normali E
-  // pseudo-elementi). Due criteri: media dei colori-stop chiara (gradiente
-  // tutto chiaro), OPPURE anche un solo stop molto chiaro. Il secondo serve
-  // per i gradienti misti tipo bianco->nero (pagina di login di Outlook Web):
-  // la media risulta "scura" ma meta' pagina resta un lenzuolo bianco.
-  function gradientIsLight(bgi) {
-    if (!bgi || bgi === "none" || bgi.indexOf("gradient") === -1) return false;
-    var stops = bgi.match(/rgba?\([^)]+\)|oklch\([^)]+\)|color\([^)]+\)/gi);
-    if (!stops) return false;
-    var sum = 0, n = 0, max = 0;
-    for (var i = 0; i < stops.length; i++) {
-      var c = parseColor(stops[i]);
-      if (c && c.a > 0.05) {
-        var L = luminance(c);
-        sum += L; n++;
-        if (L > max) max = L;
-      }
-    }
-    if (!n) return false;
-    return (sum / n) >= 150 || max >= 170;
-  }
-
-  function applyBgImage(el, cs) {
-    var key = "__notte_background-image";
-    var current = el.style.getPropertyValue("background-image");
-    if (current && current === el[key]) return; // nostro override ancora attivo
-    var bgi = cs.backgroundImage;
-    if (!bgi || bgi === "none" || bgi.indexOf("url(") !== -1) return; // niente, o immagine vera: non toccare
-    if (!gradientIsLight(bgi)) return; // solo gradienti CHIARI (media o singolo stop)
-    el.style.setProperty("background-image", "none", "important");
-    el[key] = el.style.getPropertyValue("background-image");
-    var under = parseColor(cs.backgroundColor);
-    if (!under || under.a <= 0.05) {
-      // senza il gradiente l'elemento sarebbe trasparente: nero neutro fisso
-      el.style.setProperty("background-color", "rgb(20,20,20)", "important");
-      el["__notte_background-color"] = el.style.getPropertyValue("background-color");
-    }
-  }
-
-  // ::before/::after NON sono nodi del DOM: il walk non li raggiunge e lo
-  // stile inline per loro non esiste (bug: fascia bianca su App Store Connect
-  // in Safari, ".sticky-header::before{background-color:#fff}" disegnata SOPRA
-  // il nostro header gia' scurito). Strategia: leggiamo il computed style del
-  // pseudo-elemento; se ha uno sfondo CHIARO (tinta piena o gradiente), noi
-  // (1) marchiamo l'elemento con un attributo data-notte-* e (2) gli passiamo
-  // il colore rimappato via CSS variable inline — le variabili definite
-  // sull'elemento si propagano ai SUOI pseudo-elementi, e la regola generica
-  // che le consuma vive nel base CSS. Pseudo con url(...) o gia' scuri non
-  // vengono toccati (icone, decorazioni, ombre). Una volta scurito, al giro
-  // dopo il computed risulta scuro e non si riscrive nulla (niente loop).
-  function applyPseudo(el) {
-    for (var i = 0; i < 2; i++) {
-      var which = i === 0 ? "before" : "after";
-      var pcs;
-      try { pcs = getComputedStyle(el, "::" + which); } catch (e) { continue; }
-      if (!pcs || pcs.content === "none") continue;
-      var bgi = pcs.backgroundImage;
-      if (bgi && bgi.indexOf("url(") !== -1) continue; // immagine vera: non toccare
-      var c = parseColor(pcs.backgroundColor);
-      var out = null;
-      if (c && c.a > 0.05 && luminance(c) >= 150) out = remap(c, "bg");
-      else if (gradientIsLight(bgi)) out = "rgb(20,20,20)";
-      if (out) {
-        var vn = "--notte-" + which + "-bg";
-        if (el.style.getPropertyValue(vn) !== out) el.style.setProperty(vn, out);
-        if (!el.hasAttribute("data-notte-" + which)) el.setAttribute("data-notte-" + which, "");
-      }
-      // Bordi chiari del pseudo-elemento, lato per lato (i triangoli/caret
-      // CSS hanno lati trasparenti che NON vanno toccati, quindi niente
-      // shorthand border-color): una variabile e un attributo per lato.
-      var SIDES = ["top", "right", "bottom", "left"];
-      for (var s = 0; s < 4; s++) {
-        var side = SIDES[s];
-        if (parseFloat(pcs["border" + side.charAt(0).toUpperCase() + side.slice(1) + "Width"]) > 0) {
-          var bc = parseColor(pcs["border" + side.charAt(0).toUpperCase() + side.slice(1) + "Color"]);
-          if (bc && bc.a > 0.05 && luminance(bc) >= 150) {
-            var bout = remap(bc, "br");
-            var bvn = "--notte-" + which + "-b" + side.charAt(0);
-            if (el.style.getPropertyValue(bvn) !== bout) el.style.setProperty(bvn, bout);
-            var attr = "data-notte-" + which + "-b" + side.charAt(0);
-            if (!el.hasAttribute(attr)) el.setAttribute(attr, "");
-          }
-        }
-      }
-    }
-  }
-
-  // Rimuove tutti i marchi/variabili pseudo-elemento messi da applyPseudo
-  // (usato da resyncEl e removeTheme).
-  function clearPseudoMarks(el) {
-    var whichs = ["before", "after"], letters = ["t", "r", "b", "l"];
-    for (var i = 0; i < 2; i++) {
-      var w = whichs[i];
-      if (el.hasAttribute("data-notte-" + w)) { el.removeAttribute("data-notte-" + w); el.style.removeProperty("--notte-" + w + "-bg"); }
-      for (var j = 0; j < 4; j++) {
-        var attr = "data-notte-" + w + "-b" + letters[j];
-        if (el.hasAttribute(attr)) { el.removeAttribute(attr); el.style.removeProperty("--notte-" + w + "-b" + letters[j]); }
-      }
-    }
-  }
-
-  var STYLE_SIG = "__notteStyleSig";
-
-  function styleEl(el) {
-    if (!el || el.nodeType !== 1) return;
-    var tag = el.tagName;
-    if (tag === "IMG" || tag === "VIDEO" || tag === "CANVAS" || tag === "SVG" ||
-        tag === "PICTURE" || tag === "IFRAME" || tag === "STYLE" ||
-        tag === "SCRIPT" || el.id === BASE_ID) { return; }
-    if (el.__notteHovering) return; // testo temporaneamente forzato scuro per l'hover, vedi hoverProtect()
-    var cs;
-    try { cs = getComputedStyle(el); } catch (e) { return; }
-
-    // TUTTO il resto della funzione e' avvolto in un try/catch: un elemento
-    // "strano" (un valore CSS in un formato che parseColor non riconosce, o
-    // qualunque altra eccezione imprevista - es. proprieta' Fluent UI di
-    // Outlook Web servite in modo leggermente diverso da Firefox) non deve
-    // interrompere l'elaborazione di TUTTI gli elementi successivi nello
-    // stesso giro. Senza questo, un solo elemento che fa esplodere il codice
-    // qui dentro fermava per sempre il resto del blocco in walk() (vedi piu'
-    // sotto): peggio ancora, dato che l'observer e il controllo periodico
-    // richiamano la stessa identica funzione, il tentativo di auto-ripararsi
-    // falliva sempre nello stesso punto, lasciando quella porzione di pagina
-    // permanentemente non scurita finche' non si ricaricava manualmente
-    // (bug segnalato: riquadro di risposta email di Outlook Web rimasto
-    // bianco per ore, tornato normale solo dopo un refresh).
-    try {
-      // Icone "mask": molti design system (MediaWiki/Wikipedia, Fluent, ecc.)
-      // disegnano le icone con mask-image (la FORMA) + background-color (il
-      // COLORE dell'icona che traspare dalla maschera). Quel background-color
-      // NON e' lo sfondo di un pannello ma il colore in primo piano dell'icona:
-      // trattandolo come sfondo lo lasciavamo scuro sul tema scuro, quindi
-      // l'icona spariva (bug: hamburger di Wikipedia nero su nero). Se
-      // l'elemento e' mascherato, rimappiamo il suo background-color come TESTO
-      // (fg): un'icona scura diventa chiara e torna visibile.
-      var maskImg = cs.maskImage || cs.webkitMaskImage || "none";
-      var isMasked = !!maskImg && maskImg !== "none";
-      applyColor(el, "background-color", isMasked ? "fg" : "bg", cs.backgroundColor);
-      applyColor(el, "color", "fg", cs.color);
-      // Bordi LATO PER LATO, non col solo borderTop come prima: un divisore
-      // fatto con solo border-bottom, o un triangolino/caret CSS (width:0 +
-      // border-bottom colorato e lati trasparenti, es. la freccetta del menu
-      // account di App Store Connect) hanno borderTopWidth=0 e restavano
-      // chiari. I lati trasparenti vengono saltati da applyColor (alpha ~0),
-      // quindi i triangoli restano triangoli.
-      if (parseFloat(cs.borderTopWidth) > 0) applyColor(el, "border-top-color", "br", cs.borderTopColor);
-      if (parseFloat(cs.borderRightWidth) > 0) applyColor(el, "border-right-color", "br", cs.borderRightColor);
-      if (parseFloat(cs.borderBottomWidth) > 0) applyColor(el, "border-bottom-color", "br", cs.borderBottomColor);
-      if (parseFloat(cs.borderLeftWidth) > 0) applyColor(el, "border-left-color", "br", cs.borderLeftColor);
-      applyBgImage(el, cs);
-      applyPseudo(el);
-      el[MARK] = 1;
-      // Firma dello stile inline dopo la nostra scrittura: serve all'observer
-      // per riconoscere "questa mutazione l'ho appena fatta io" ed evitare di
-      // rincorrere all'infinito le proprie stesse modifiche (vedi observer).
-      el[STYLE_SIG] = el.getAttribute("style");
-    } catch (e) {}
-  }
-
-  // Rilegge il colore VERO di un elemento ignorando il nostro stesso override:
-  // usato quando il SITO cambia una classe (es. :hover, riga selezionata in
-  // una webmail) sotto il nostro stile inline. styleEl() da solo non se ne
-  // accorgerebbe: getComputedStyle mostrerebbe sempre il NOSTRO colore
-  // (l'inline !important vince comunque sulla classe), quindi il confronto in
-  // applyColor() penserebbe "nessun cambiamento" e la riga resterebbe bloccata
-  // sul colore di prima (bug capitato: riga selezionata non evidenziata,
-  // oppure colore di un vecchio hover rimasto "congelato" su una riga).
-  function resyncEl(el) {
-    if (!el || el.nodeType !== 1) return;
-    var tag = el.tagName;
-    if (tag === "IMG" || tag === "VIDEO" || tag === "CANVAS" || tag === "SVG" ||
-        tag === "PICTURE" || tag === "IFRAME" || tag === "STYLE" ||
-        tag === "SCRIPT" || el.id === BASE_ID) { return; }
-    if (el.__notteHovering) return; // non toccare un elemento protetto da hoverProtect()
-    // Stesso principio di styleEl(): un errore isolato qui non deve impedire
-    // di risincronizzare gli altri elementi del sotto-albero (vedi
-    // resyncSubtree) o proseguire il resto del giro.
-    try {
-      el.style.removeProperty("background-color");
-      el.style.removeProperty("color");
-      el.style.removeProperty("border-top-color");
-      el.style.removeProperty("border-right-color");
-      el.style.removeProperty("border-bottom-color");
-      el.style.removeProperty("border-left-color");
-      // background-image: rimuoverlo SOLO se l'abbiamo messo noi. Un sito puo'
-      // avere un background-image inline suo (es. avatar via url(...)): se lo
-      // togliessimo qui, styleEl non lo ripristinerebbe mai (noi non salviamo
-      // i valori originali del sito).
-      if (el["__notte_background-image"] !== undefined) {
-        el.style.removeProperty("background-image");
-        el["__notte_background-image"] = undefined;
-      }
-      // Pseudo-elementi: togliamo i marchi cosi' styleEl() rivaluta da zero
-      // il vero colore sottostante (il sito potrebbe aver cambiato lo stato).
-      clearPseudoMarks(el);
-      styleEl(el);
-    } catch (e) {}
-  }
-
-  // Alcuni cambi di stato (es. classe "is-selected" su una riga di webmail
-  // quando la selezioni/deselezioni) non toccano SOLO l'elemento il cui
-  // attributo e' mutato: la regola CSS del sito e' spesso del tipo
-  // ".selected .child{...}", quindi anche i DISCENDENTI cambiano colore pur
-  // non avendo subito loro stessi alcuna mutazione. Il problema e' che quei
-  // discendenti hanno gia' un nostro inline style "!important": il loro
-  // getComputedStyle continua percio' a riflettere il VECCHIO valore che
-  // avevamo forzato, non quello vero sotto la nuova classe, finche' qualcuno
-  // non lo rilegge da capo. Risincronizzando solo l'elemento mutato (come
-  // faceva prima resyncEl da solo) i figli restavano "congelati" al colore
-  // di prima della (de)selezione fino al reload della pagina (bug segnalato:
-  // riga di una webmail che non torna al colore normale dopo la
-  // deselezione). Qui ripassiamo l'intero sotto-albero dell'elemento
-  // mutato, non solo lui.
-  function resyncSubtree(el) {
-    resyncEl(el);
-    if (!el.querySelectorAll) return;
-    var list;
-    try { list = el.querySelectorAll("*"); } catch (e) { return; }
-    // A blocchi come walk(): un cambio di classe su un contenitore gigante
-    // (es. Gmail) prima risincronizzava l'INTERO sotto-albero in un colpo
-    // solo, bloccando il frame abbastanza a lungo da far scattare il "Pagina
-    // non risponde" di Chrome. Ora cediamo il controllo al browser ogni 400
-    // elementi e teniamo conto del tempo speso (vedi noteBusy/circuit breaker).
-    var i = 0;
-    function rchunk() {
-      // Niente "if (bailed) return" in testa: un resync guidato da
-      // un'interazione (selezione di un messaggio, hover, stato letto/non
-      // letto) riguarda un sotto-albero PICCOLO e DEVE girare anche col
-      // breaker scattato, altrimenti selezione e stati smettono di
-      // aggiornarsi (bug Firefox: nessuna selezione, letti = non letti). Il
-      // primo blocco gira sempre; solo la CONTINUAZIONE su sotto-alberi
-      // enormi viene sospesa durante il bail.
-      var t0 = perfNow();
-      var end = Math.min(i + 400, list.length);
-      for (; i < end; i++) resyncEl(list[i]);
-      noteBusy(t0);
-      if (i < list.length && !bailed) window.setTimeout(rchunk, 0);
-    }
-    rchunk();
-  }
-
-  function walk(root) {
-    if (!root) return;
-    if (root.nodeType === 1) styleEl(root);
-    var list;
-    try { list = root.querySelectorAll ? root.querySelectorAll("*") : []; }
-    catch (e) { return; }
-    // A blocchi, per non bloccare la pagina su DOM enormi.
-    var i = 0;
-    function chunk() {
-      if (bailed) return;
-      var t0 = perfNow();
-      var end = Math.min(i + 400, list.length);
-      for (; i < end; i++) {
-        // Difesa in profondita': styleEl() gia' contiene i propri errori, ma
-        // registerShadowRoot/walk ricorsivo no - un try/catch qui assicura
-        // che nessun elemento del blocco possa mai fermare quelli dopo di lui.
-        try {
-          styleEl(list[i]);
-          if (list[i].shadowRoot) {
-            // Scende negli shadow root aperti; registra anche quelli non
-            // annunciati da shadow-patch (rete di sicurezza: listener hover,
-            // observer e base CSS servono in OGNI root).
-            registerShadowRoot(list[i].shadowRoot);
-            walk(list[i].shadowRoot);
-          }
-        } catch (e) {}
-      }
-      noteBusy(t0);
-      if (i < list.length) window.setTimeout(chunk, 0);
-    }
-    chunk();
-  }
-
-  // Tematizza un sotto-albero PICCOLO anche mentre il circuit breaker e'
-  // scattato. Serve ai menu/dropdown appena aperti: sono nodi minuscoli, ma
-  // senza questo resterebbero bianchi per tutto il cooldown (il walk normale
-  // si autoannulla quando bailed e' true). Cap severo sul numero di elementi:
-  // un sotto-albero grande viene lasciato alla ripresa completa, per non
-  // rischiare di ri-saturare il thread proprio mentre stiamo cercando di
-  // tenerlo libero. Sincrono e NON conteggiato dal breaker (noteBusy): il
-  // lavoro e' minimo e limitato dal cap.
-  function walkLight(root) {
-    if (!root || root.nodeType !== 1) return;
-    try {
-      styleEl(root);
-      var list = root.querySelectorAll ? root.querySelectorAll("*") : [];
-      if (list.length > 300) return; // troppo grande: lo prende la ripresa
-      for (var i = 0; i < list.length; i++) {
-        try {
-          styleEl(list[i]);
-          if (list[i].shadowRoot) { registerShadowRoot(list[i].shadowRoot); walkLight(list[i].shadowRoot); }
-        } catch (e) {}
-      }
-    } catch (e) {}
-  }
-
-  var observer = null;
-  // Osserviamo TUTTI gli attributi, non solo style/class: i framework moderni
-  // (React Aria - usato da App Store Connect, vedi data-react-aria-pressable)
-  // pilotano hover/selezione/focus con attributi data-* (data-hovered,
-  // data-focused...) e il CSS si aggancia a quelli. Con il filtro
-  // ["style","class"] quei cambi di stato erano invisibili: lo sfondo
-  // diventava chiaro senza che noi lo ritematizzassimo (bug: hover del menu
-  // account e card "a volte bianche a volte nere" su App Store Connect).
-  var OBSERVE_OPTS = { childList: true, subtree: true, attributes: true };
-  function observeRoot(root) {
-    if (!observer) return;
-    try { observer.observe(root, OBSERVE_OPTS); } catch (e) {}
-  }
-  // Le mutazioni di ATTRIBUTI vengono accumulate e processate una volta per
-  // frame (requestAnimationFrame), deduplicando i bersagli. Prima ogni singola
-  // mutazione faceva ripartire SUBITO un resyncSubtree sincrono dell'intero
-  // sotto-albero: i siti complessi cambiano classi/attributi molte volte al
-  // secondo sugli stessi contenitori, e col crescere del DOM di una SPA quel
-  // costo cresceva senza sosta -> rallentamento progressivo (segnalato su
-  // Chrome: scheda fluida all'inizio, sempre piu' lenta col passare del tempo).
-  // Ora una raffica collassa in una sola passata e, se in coda ci sono sia un
-  // antenato sia un suo discendente, si risincronizza solo l'antenato (che
-  // copre gia' il discendente). Il comportamento visibile non cambia: il
-  // resync avviene comunque, solo raggruppato entro il frame successivo.
-  var pendSub = null, pendEl = null, flushScheduled = false;
-  function ensurePending() { if (!pendSub) { pendSub = new Set(); pendEl = new Set(); } }
-  function scheduleFlush() {
-    if (flushScheduled) return;
-    flushScheduled = true;
-    var raf = window.requestAnimationFrame || function (f) { return window.setTimeout(f, 16); };
-    raf(flushResync);
-  }
-  // true se un ANTENATO dell'elemento e' anch'esso in coda per un
-  // resyncSubtree: in tal caso quel resync lo copre gia' e questo e' inutile
-  // (sale anche attraverso i confini shadow via .host).
-  function ancestorInSet(el, set) {
-    var p = el.parentNode;
-    while (p) {
-      if (set.has(p)) return true;
-      p = p.parentNode || p.host || null;
-    }
-    return false;
-  }
-  function flushResync() {
-    flushScheduled = false;
-    if (!pendSub) return;
-    var subs = pendSub, els = pendEl;
-    pendSub = null; pendEl = null;
-    subs.forEach(function (el) {
-      try { if (el.isConnected && !ancestorInSet(el, subs)) resyncSubtree(el); } catch (e) {}
-    });
-    els.forEach(function (el) {
-      // gia' coperto se lui stesso o un antenato e' in un resyncSubtree in coda
-      try { if (el.isConnected && !subs.has(el) && !ancestorInSet(el, subs)) resyncEl(el); } catch (e) {}
-    });
-  }
-  function startObserver() {
-    if (observer) return;
-    observer = new MutationObserver(function (muts) {
-      for (var i = 0; i < muts.length; i++) {
-        // Un try/catch per ogni singola mutazione: se una in particolare
-        // provoca un errore, le mutazioni successive nello STESSO batch non
-        // devono essere perse - stessa logica di styleEl/walk.
-        try {
-          var m = muts[i];
-          if (m.type === "attributes") {
-            var an = m.attributeName || "";
-            // Le NOSTRE marcature pseudo-elemento non devono rincorrersi da sole.
-            if (an.indexOf("data-notte-") === 0) continue;
-            var el = m.target;
-            ensurePending();
-            if (an === "style") {
-              // Confrontiamo con la firma dell'ultima scrittura NOSTRA: se
-              // combacia e' solo l'eco della nostra stessa modifica (altrimenti
-              // loop infinito) - se e' diversa, e' stato il sito a toccarlo.
-              // Accodiamo un resync del solo elemento.
-              if (el.getAttribute("style") !== el[STYLE_SIG]) { pendEl.add(el); scheduleFlush(); }
-            } else {
-              // class, data-hovered/data-selected/aria-*: qualunque attributo
-              // puo' cambiare lo stato visivo via CSS, e la regola del sito
-              // e' spesso del tipo ".selected .child{...}" - accodiamo un
-              // resync dell'intero sotto-albero (vedi resyncSubtree), non solo
-              // l'elemento mutato, altrimenti i discendenti restano congelati
-              // al colore di prima.
-              pendSub.add(el); scheduleFlush();
-            }
-          } else {
-            var nodes = m.addedNodes;
-            if (nodes.length) sentinelSoon(); // vedi sentinelSoon: SPA nav
-            for (var j = 0; j < nodes.length; j++) {
-              var n = nodes[j];
-              // Mentre il breaker e' scattato usiamo il walk leggero (limitato):
-              // tematizza subito menu/dropdown appena aperti senza rischiare di
-              // ri-saturare il thread. A regime, walk() normale (a blocchi).
-              if (bailed) walkLight(n); else walk(n);
-              // Un <style> o <link rel="stylesheet"> aggiunto cambia i colori
-              // anche di elementi GIA' processati: il walk del solo nodo
-              // aggiunto non basta, serve una ripassata completa (per i <link>
-              // anche al load, quando le regole sono davvero attive).
-              if (n.nodeType === 1) {
-                if (n.tagName === "STYLE" && n.id !== BASE_ID) scheduleRetheme();
-                else if (n.tagName === "LINK" && /stylesheet/i.test(n.rel || "")) {
-                  scheduleRetheme();
-                  n.addEventListener("load", scheduleRetheme);
-                }
-              }
-            }
-          }
-        } catch (e) {}
-      }
-    });
-    try { observer.observe(document.documentElement, OBSERVE_OPTS); } catch (e) {}
-    for (var k = 0; k < shadowRoots.length; k++) observeRoot(shadowRoots[k]); // shadow root gia' presenti
-  }
-  function stopObserver() { if (observer) { observer.disconnect(); observer = null; } }
-
-  var themed = false;
-  function applyTheme() {
-    // NB: nessun "if (themed) return" qui. loadAndRender() richiama
-    // applyTheme() anche a 200/700/1600ms: vogliamo che ogni chiamata
-    // ri-percorra il DOM per recuperare eventuali stili resettati dal sito
-    // (vedi applyColor: e' economico, non fa nulla se non e' cambiato nulla).
-    if (bailed) return;
-    themed = true;
-    ensureBase();
-    for (var s = 0; s < shadowRoots.length; s++) ensureBase(shadowRoots[s]);
-    walk(document.documentElement);
-    startObserver(); // no-op se gia' avviato
-  }
-  function removeTheme() {
-    stopObserver();
-    removeBase();
-    for (var rb = 0; rb < shadowRoots.length; rb++) removeBase(shadowRoots[rb]);
-    if (themed) {
-      var roots = [document].concat(shadowRoots);
-      for (var r = 0; r < roots.length; r++) {
-        var done = roots[r].querySelectorAll ? roots[r].querySelectorAll("*") : [];
-        for (var i = 0; i < done.length; i++) {
-          try {
-            var el = done[i];
-            if (el[MARK]) {
-              el.style.removeProperty("background-color");
-              el.style.removeProperty("color");
-              el.style.removeProperty("border-top-color");
-              el.style.removeProperty("border-right-color");
-              el.style.removeProperty("border-bottom-color");
-              el.style.removeProperty("border-left-color");
-              if (el["__notte_background-image"] !== undefined) {
-                el.style.removeProperty("background-image");
-                el["__notte_background-image"] = undefined;
-              }
-              clearPseudoMarks(el);
-              el[MARK] = 0;
-            }
-          } catch (e) {}
-        }
-      }
-    }
-    themed = false;
-  }
-
-  /* ---------- Protezione testo sugli :hover che non controlliamo ----------
-   * Alcuni siti mostrano uno sfondo chiaro al passaggio del mouse tramite CSS
-   * puro (:hover), senza toccare il DOM: invisibile al nostro
-   * observer/walk basato su mutazioni. Non possiamo scurire quello sfondo,
-   * ma possiamo evitare che il nostro testo chiaro sparisca sopra di esso,
-   * forzandolo temporaneamente scuro finche' il mouse resta li' (bug
-   * capitato: nome del contatto illeggibile su un menu a tendina di Outlook).
-   */
-  function isSkipTag(tag) {
-    return tag === "IMG" || tag === "VIDEO" || tag === "CANVAS" || tag === "SVG" ||
-           tag === "PICTURE" || tag === "IFRAME" || tag === "STYLE" || tag === "SCRIPT";
-  }
-  // Contenitori attualmente protetti: servono a sweepHover() per rilasciare
-  // le protezioni rimaste "appese". La protezione veniva tolta SOLO dal
-  // mouseout: se il nodo sotto il cursore viene sostituito da un re-render
-  // (React), il mouseout non arriva mai e gli elementi restavano marcati
-  // __notteHovering PER SEMPRE - saltati da styleEl/resyncEl, quindi mai piu'
-  // ritematizzati (bug: card bianche "congelate" su App Store Connect,
-  // inline con il nostro color ma senza background-color).
-  var hoverRoots = [];
-  // Scurisce lo sfondo chiaro che compare SOLO al passaggio del mouse (regola
-  // :hover pura del sito, invisibile al nostro observer perche' non tocca il
-  // DOM). Prima invece forzavamo scuro il TESTO dell'intero sotto-albero,
-  // ottenendo testo nero su fondo azzurro chiaro: leggibile ma stonato col
-  // tema scuro (segnalato: etichetta "Nouveau" e chevron NERI in hover sulla
-  // toolbar di Outlook Web). Un background inline !important batte la regola
-  // :hover del sito, quindi scuriamo lo sfondo e lasciamo il testo chiaro.
-  function protectBg(el) {
-    if (el.__notteHovering) return;
-    var cs;
-    try { cs = getComputedStyle(el); } catch (e) { return; }
-    var c = parseColor(cs.backgroundColor);
-    if (!c || c.a < 0.3 || luminance(c) < 150) return;
-    el.__notteHoverBg = el.style.getPropertyValue("background-color");
-    el.style.setProperty("background-color", remap(c, "bg"), "important");
-    el.__notteHovering = true;
-    el[STYLE_SIG] = el.getAttribute("style");
-    if (hoverRoots.indexOf(el) === -1) hoverRoots.push(el);
-  }
-  function protectSubtree(root) {
-    var nodes = [root].concat(Array.prototype.slice.call(root.querySelectorAll("*")));
-    for (var i = 0; i < nodes.length; i++) {
-      try {
-        var el = nodes[i];
-        if (isSkipTag(el.tagName) || el.__notteHovering) continue;
-        el.__notteHoverColor = el.style.getPropertyValue("color");
-        el.style.setProperty("color", "#141414", "important");
-        el.__notteHovering = true;
-      } catch (e) {}
-    }
-    if (hoverRoots.indexOf(root) === -1) hoverRoots.push(root);
-  }
-  // Rilascia ogni protezione il cui contenitore non e' piu' sotto il mouse
-  // (o non e' piu' nel documento) e ritematizza subito quel sotto-albero,
-  // che potrebbe essersi perso dei cambi di colore mentre era protetto.
-  function sweepHover() {
-    for (var i = hoverRoots.length - 1; i >= 0; i--) {
-      var r = hoverRoots[i];
-      var stale = true;
-      try { stale = !r.isConnected || !r.matches(":hover"); } catch (e) { stale = true; }
-      if (stale) {
-        restoreSubtree(r);
-        hoverRoots.splice(i, 1);
-        if (r.isConnected && themed) walk(r);
-      }
-    }
-  }
-  function restoreSubtree(root) {
-    var nodes = [root].concat(Array.prototype.slice.call(root.querySelectorAll("*")));
-    for (var i = 0; i < nodes.length; i++) {
-      try {
-        var el = nodes[i];
-        if (!el.__notteHovering) continue;
-        el.__notteHovering = false;
-        // Ripristina lo SFONDO se lo avevamo scurito noi per l'hover (protectBg).
-        if (el.__notteHoverBg !== undefined) {
-          if (el.__notteHoverBg) el.style.setProperty("background-color", el.__notteHoverBg, "important");
-          else el.style.removeProperty("background-color");
-          el.__notteHoverBg = undefined;
-        }
-        // Ripristina il COLORE solo se lo avevamo forzato noi (protectSubtree):
-        // per gli elementi protetti col solo sfondo __notteHoverColor e'
-        // undefined e NON dobbiamo toccare il colore themizzato normale.
-        if (el.__notteHoverColor !== undefined) {
-          if (el.__notteHoverColor) el.style.setProperty("color", el.__notteHoverColor, "important");
-          else el.style.removeProperty("color");
-          el.__notteHoverColor = undefined;
-        }
-        // Riallinea la firma anti-eco: altrimenti l'observer vedrebbe questa
-        // nostra stessa scrittura come un cambiamento "esterno" e la
-        // rincorrerebbe inutilmente con resyncEl().
-        el[STYLE_SIG] = el.getAttribute("style");
-      } catch (e) {}
-    }
-  }
-  // Lo sfondo chiaro dell'hover spesso e' su un CONTENITORE (es. la riga),
-  // non sull'elemento preciso sotto il cursore (es. lo <span> col nome): per
-  // questo risaliamo qualche livello di antenati cercando chi ha lo sfondo
-  // chiaro, e proteggiamo l'intero sotto-albero di quel contenitore.
-  // Un highlight di hover puo' anche essere disegnato da un ::before/::after
-  // (pseudo-elemento, invisibile al controllo sul backgroundColor
-  // dell'elemento): controlliamo anche quelli (bug: voce "Sign Out" del menu
-  // account di App Store Connect illeggibile al passaggio del mouse).
-  function pseudoLight(el, which) {
-    var pcs;
-    try { pcs = getComputedStyle(el, "::" + which); } catch (e) { return false; }
-    if (!pcs || pcs.content === "none") return false;
-    var c = parseColor(pcs.backgroundColor);
-    if (c && c.a >= 0.3 && luminance(c) >= 150) return true;
-    return gradientIsLight(pcs.backgroundImage);
-  }
-  // Sale di un livello ANCHE attraverso i confini degli shadow root: dentro
-  // uno shadow DOM parentElement del nodo piu' esterno e' null, ma l'albero
-  // continua nell'host. Senza questo, la risalita si fermava al bordo dello
-  // shadow root e lo sfondo chiaro (magari sull'host o piu' su) sfuggiva.
-  function upEl(el) {
-    if (el.parentElement) return el.parentElement;
-    var r = el.getRootNode ? el.getRootNode() : null;
-    return (r && r.host) ? r.host : null;
-  }
-  function hoverProtect(target) {
-    var el = target, depth = 0;
-    while (el && el.nodeType === 1 && depth < 8) {
-      if (!isSkipTag(el.tagName)) {
-        var cs;
-        try { cs = getComputedStyle(el); } catch (e) { cs = null; }
-        var bg = cs ? parseColor(cs.backgroundColor) : null;
-        if (bg && bg.a >= 0.3 && luminance(bg) >= 150) {
-          // Sfondo chiaro dell'hover su un vero elemento: lo SCURIAMO e
-          // lasciamo il testo chiaro -> hover scuro coerente col tema, niente
-          // piu' testo nero su fondo azzurro.
-          protectBg(el);
-        } else if (pseudoLight(el, "before") || pseudoLight(el, "after")) {
-          // Sfondo chiaro disegnato da un ::before/::after: non raggiungibile
-          // con un background inline, quindi ripieghiamo sulla protezione del
-          // testo (lo forziamo scuro perche' resti leggibile sul chiaro).
-          protectSubtree(el);
-        }
-      }
-      el = upEl(el);
-      depth++;
-    }
-  }
-  function hoverRestore(target) {
-    var el = target, depth = 0;
-    while (el && el.nodeType === 1 && depth < 8) {
-      restoreSubtree(el);
-      el = upEl(el);
-      depth++;
-    }
-  }
-
-  /* ---------- Rilevatore "pagina gia scura/mista" (modalita prudente) ---------- */
-  function luminance(c) { return 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b; }
+  // src/engine/detect.js
   function bgOf(el) {
     if (!el || el.nodeType !== 1) return null;
-    var c = parseColor(getComputedStyle(el).backgroundColor);
-    return (c && c.a > 0.2) ? c : null;
+    var c;
+    try {
+      c = parseColor(getComputedStyle(el).backgroundColor);
+    } catch (e) {
+      return null;
+    }
+    return c && c.a > 0.2 ? c : null;
   }
   function bgAtPoint(x, y) {
     var el = document.elementFromPoint(x, y), g = 0;
     while (el && el.nodeType === 1 && g < 40) {
-      var c = bgOf(el); if (c) return c;
-      el = el.parentElement; g++;
+      var c = bgOf(el);
+      if (c) return c;
+      el = el.parentElement;
+      g++;
     }
     return null;
   }
-  function pageAlreadyThemed() {
+  function withNotteSheetsOff(fn) {
+    var ours = [];
     try {
-      var w = innerWidth || 0, h = innerHeight || 0, s = [];
-      if (w && h && document.elementFromPoint) {
-        var pts = [[w*.5,h*.08],[w*.2,h*.08],[w*.8,h*.08],[w*.5,h*.35],
-          [w*.5,h*.6],[w*.5,h*.85],[w*.2,h*.5],[w*.8,h*.5],[w*.2,h*.8],[w*.8,h*.8]];
-        for (var i = 0; i < pts.length; i++) { var c = bgAtPoint(pts[i][0], pts[i][1]); if (c) s.push(c); }
+      ours = document.querySelectorAll("style[data-notte]");
+    } catch (e) {
+      ours = [];
+    }
+    var prev = [];
+    for (var i = 0; i < ours.length; i++) {
+      try {
+        prev[i] = ours[i].disabled;
+        ours[i].disabled = true;
+      } catch (e) {
+        prev[i] = false;
       }
-      if (!s.length) { var b = bgOf(document.body) || bgOf(document.documentElement); if (!b) return false; s.push(b); }
-      var d = 0; for (var j = 0; j < s.length; j++) if (luminance(s[j]) < 128) d++;
-      // Col nuovo motore che rimappa i colori, saltiamo solo le pagine gia'
-      // quasi tutte scure (tema scuro nativo, es. Gmail scuro): per quelle il
-      // tema nativo e' migliore. Le pagine miste/chiare le scuriamo noi.
-      return (d / s.length) >= 0.7;
-    } catch (e) { return false; }
+    }
+    try {
+      return fn();
+    } finally {
+      for (var j = 0; j < ours.length; j++) {
+        try {
+          ours[j].disabled = prev[j];
+        } catch (e) {
+        }
+      }
+    }
+  }
+  function opaqueLum(el) {
+    if (!el || el.nodeType !== 1) return null;
+    var c;
+    try {
+      c = parseColor(getComputedStyle(el).backgroundColor);
+    } catch (e) {
+      return null;
+    }
+    if (!c || c.a < 0.5) return null;
+    return luminance(c);
+  }
+  function pageAlreadyThemed() {
+    return withNotteSheetsOff(function() {
+      return decide();
+    });
+  }
+  function decide() {
+    try {
+      var backdrop = opaqueLum(document.body);
+      if (backdrop == null) backdrop = opaqueLum(document.documentElement);
+      if (backdrop != null) return backdrop < 100;
+      return sampleDarkFraction() >= 0.85;
+    } catch (e) {
+      return false;
+    }
+  }
+  function sampleDarkFraction() {
+    var w = innerWidth || 0, h = innerHeight || 0, s = [];
+    if (w && h && document.elementFromPoint) {
+      var pts = [
+        [w * 0.5, h * 0.08],
+        [w * 0.2, h * 0.08],
+        [w * 0.8, h * 0.08],
+        [w * 0.5, h * 0.35],
+        [w * 0.5, h * 0.6],
+        [w * 0.5, h * 0.85],
+        [w * 0.2, h * 0.5],
+        [w * 0.8, h * 0.5],
+        [w * 0.2, h * 0.8],
+        [w * 0.8, h * 0.8]
+      ];
+      for (var i = 0; i < pts.length; i++) {
+        var c = bgAtPoint(pts[i][0], pts[i][1]);
+        if (c) s.push(c);
+      }
+    }
+    if (!s.length) {
+      var b = bgOf(document.body) || bgOf(document.documentElement);
+      if (!b) return 0;
+      s.push(b);
+    }
+    var d = 0;
+    for (var j = 0; j < s.length; j++) if (luminance(s[j]) < 128) d++;
+    return d / s.length;
   }
 
-  /* ---------- Decisione + ciclo ---------- */
-  // loadAndRender() gira piu' volte sulla stessa pagina (subito, poi a
-  // 200/700/1600ms): se richiamassimo pageAlreadyThemed() ad ogni giro,
-  // dopo che abbiamo gia' scurito la pagina noi stessi la ricampioneremmo
-  // scura, concludendo per errore "e' un tema scuro nativo del sito" e
-  // togliendo il tema (flash chiaro) - salvo poi riapplicarlo al giro dopo
-  // (flash scuro), in un lampeggio continuo. La rilevazione va fatta UNA
-  // sola volta, sui colori originali del sito prima di toccarli.
-  var autoDecision = null;
-  function decide(s) {
-    if (Object.prototype.hasOwnProperty.call(s.overrides, host)) return s.overrides[host];
-    // Nuovi siti partono sempre scuri; i siti gia' scuri di loro vengono
-    // sempre rilevati e lasciati stare (non piu' opzioni disattivabili).
-    if (autoDecision === null) autoDecision = pageAlreadyThemed();
-    if (autoDecision) return false;
-    return true;
+  // src/engine/inline.js
+  var INLINE_ID = "__notte_inline__";
+  var ATTR = "data-notte-inline";
+  function createInlineManager(getTheme, getColorVars) {
+    getColorVars = getColorVars || function() {
+      return { has: function() {
+        return false;
+      } };
+    };
+    var styleEl = null;
+    var rules = /* @__PURE__ */ Object.create(null);
+    var counter = 0;
+    var observer = null;
+    var flushScheduled = false;
+    function ensureSheet() {
+      if (styleEl && styleEl.isConnected) return;
+      var head = document.head || document.documentElement;
+      styleEl = document.createElement("style");
+      styleEl.id = INLINE_ID;
+      styleEl.setAttribute("data-notte", "");
+      head.appendChild(styleEl);
+    }
+    function scheduleFlush() {
+      if (flushScheduled) return;
+      flushScheduled = true;
+      var run = function() {
+        flushScheduled = false;
+        ensureSheet();
+        var text = "";
+        for (var id in rules) text += rules[id];
+        styleEl.textContent = text;
+      };
+      if (typeof queueMicrotask === "function") queueMicrotask(run);
+      else Promise.resolve().then(run);
+    }
+    function process(el) {
+      if (!el || el.nodeType !== 1 || !el.style) return;
+      var tag = el.tagName;
+      if (tag === "STYLE" || tag === "SCRIPT" || tag === "IMG" || tag === "VIDEO" || tag === "CANVAS" || tag === "IFRAME") return;
+      var decls = transformDeclaration(el.style, getTheme(), getColorVars());
+      var svg = transformSvgPaints(el, getColorVars());
+      if (svg.length) decls = decls.concat(svg);
+      var attrs = transformHtmlColorAttrs(el, getTheme(), getColorVars());
+      if (attrs.length) decls = decls.concat(attrs);
+      var id = el.getAttribute(ATTR);
+      if (!decls.length) {
+        if (id) {
+          delete rules[id];
+          el.removeAttribute(ATTR);
+          scheduleFlush();
+        }
+        return;
+      }
+      if (!id) {
+        id = String(++counter);
+        el.setAttribute(ATTR, id);
+      }
+      rules[id] = "[" + ATTR + '="' + id + '"]{' + decls.join(";") + "}";
+      scheduleFlush();
+    }
+    function scanAll(root) {
+      var list;
+      try {
+        list = (root || document).querySelectorAll("[style],[fill],[stroke],[color],[bgcolor]");
+      } catch (e) {
+        return;
+      }
+      for (var i = 0; i < list.length; i++) process(list[i]);
+    }
+    function start() {
+      if (observer) return;
+      ensureSheet();
+      scanAll(document);
+      observer = new MutationObserver(function(muts) {
+        for (var i = 0; i < muts.length; i++) {
+          var m = muts[i];
+          if (m.type === "attributes") {
+            try {
+              process(m.target);
+            } catch (e) {
+            }
+          } else if (m.addedNodes) {
+            for (var j = 0; j < m.addedNodes.length; j++) {
+              var n = m.addedNodes[j];
+              if (n.nodeType !== 1) continue;
+              try {
+                if (n.hasAttribute && (n.hasAttribute("style") || n.hasAttribute("fill") || n.hasAttribute("stroke") || n.hasAttribute("color") || n.hasAttribute("bgcolor"))) process(n);
+                if (n.querySelectorAll) scanAll(n);
+              } catch (e) {
+              }
+            }
+          }
+        }
+      });
+      try {
+        observer.observe(document.documentElement, {
+          subtree: true,
+          childList: true,
+          attributes: true,
+          attributeFilter: ["style"]
+        });
+      } catch (e) {
+      }
+    }
+    function stop() {
+      if (observer) {
+        observer.disconnect();
+        observer = null;
+      }
+      rules = /* @__PURE__ */ Object.create(null);
+      if (styleEl && styleEl.parentNode) styleEl.parentNode.removeChild(styleEl);
+      styleEl = null;
+    }
+    return { start, stop, refresh: function() {
+      scanAll(document);
+    } };
+  }
+
+  // src/engine/watch.js
+  function isOurs(n) {
+    return n && n.getAttribute && n.getAttribute("data-notte") !== null;
+  }
+  function createStylesheetWatcher(onChanged, isLoading) {
+    isLoading = isLoading || function() {
+      return false;
+    };
+    var timer = null, first = 0, microPending = false;
+    function processBeforePaint() {
+      if (microPending) return;
+      microPending = true;
+      var run = function() {
+        microPending = false;
+        onChanged();
+      };
+      if (typeof queueMicrotask === "function") queueMicrotask(run);
+      else Promise.resolve().then(run);
+    }
+    function schedule() {
+      if (!isLoading()) {
+        processBeforePaint();
+        return;
+      }
+      var now = Date.now();
+      if (!timer) first = now;
+      else clearTimeout(timer);
+      var wait = now - first > 400 ? 0 : 48;
+      timer = setTimeout(function() {
+        timer = null;
+        onChanged();
+      }, wait);
+    }
+    var mo = new MutationObserver(function(muts) {
+      for (var i = 0; i < muts.length; i++) {
+        var m = muts[i];
+        var added = m.addedNodes || [];
+        for (var j = 0; j < added.length; j++) {
+          var n = added[j];
+          if (n.nodeType !== 1 || isOurs(n)) continue;
+          if (n.tagName === "STYLE") schedule();
+          else if (n.tagName === "LINK" && /stylesheet/i.test(n.rel || "")) {
+            schedule();
+            n.addEventListener("load", schedule);
+          }
+        }
+        var removed = m.removedNodes || [];
+        for (var k = 0; k < removed.length; k++) {
+          var rn = removed[k];
+          if (rn.nodeType === 1 && !isOurs(rn) && (rn.tagName === "STYLE" || rn.tagName === "LINK")) schedule();
+        }
+      }
+    });
+    try {
+      mo.observe(document.documentElement, { childList: true, subtree: true });
+    } catch (e) {
+    }
+    document.addEventListener("__notte_css_changed__", schedule, true);
+    return {
+      stop: function() {
+        if (timer) clearTimeout(timer);
+        mo.disconnect();
+        document.removeEventListener("__notte_css_changed__", schedule, true);
+      }
+    };
+  }
+
+  // src/engine/shadow.js
+  function scanShadowRoots(root, out) {
+    var list;
+    try {
+      list = root.querySelectorAll ? root.querySelectorAll("*") : null;
+    } catch (e) {
+      return;
+    }
+    if (!list) return;
+    for (var i = 0; i < list.length; i++) {
+      var el = list[i];
+      var sr = el.shadowRoot;
+      if (sr) {
+        if (out.indexOf(sr) === -1) out.push(sr);
+        scanShadowRoots(sr, out);
+      }
+    }
+  }
+
+  // src/settings.js
+  var DEFAULTS = {
+    overrides: {},
+    // { "example.com": true|false }  — extension on/off per site
+    dark: {}
+    // { "example.com": true|false }  — dark-mode feature on/off per site
+    // Reserved for v3 (per-site profiles):
+    // perSite: { "example.com": { minContrast: 4.5, fontScale: 1.2, ... } }
+  };
+  function makeTheme(mode) {
+    return {
+      mode: mode || "dark",
+      // "dark" | "off"
+      // --- v3 accessibility hooks (inert in v2) ---
+      minContrast: null,
+      // number: guaranteed WCAG contrast target (AA 4.5 / AAA 7)
+      brightness: null,
+      // number: -100..100
+      saturation: null,
+      // number: -100..100 (0 = grayscale)
+      sepia: null,
+      // number: 0..100 warm tint
+      fontScale: null,
+      // number: 1 = 100%
+      fontFamily: null,
+      // string: e.g. "OpenDyslexic"
+      lineHeight: null,
+      // number
+      letterSpacing: null,
+      // number (em)
+      wordSpacing: null,
+      // number (em)
+      focusOutline: null,
+      // bool: strong focus ring
+      reduceMotion: null,
+      // bool
+      underlineLinks: null,
+      // bool
+      dimImages: null
+      // number: 0..100
+    };
   }
   function merge(s) {
     s = s || {};
-    return { overrides: s.overrides || {} };
+    return { overrides: s.overrides || {}, dark: s.dark || {} };
   }
-  function loadAndRender() {
+
+  // src/index.js
+  (function() {
+    "use strict";
+    var api2 = typeof browser !== "undefined" ? browser : chrome;
+    var host = location.hostname || "";
+    var THEME_ID = "__notte_theme__";
+    var CORS_ID = "__notte_cors__";
     try {
-      var p = api.storage.local.get(DEFAULTS);
-      var go = function (s) { if (decide(merge(s))) applyTheme(); else removeTheme(); };
-      if (p && typeof p.then === "function") p.then(go).catch(function () {});
-      else api.storage.local.get(DEFAULTS, go);
-    } catch (e) {}
-  }
-
-  // NB: NIENTE guard "solo frame principale" (rimosso). Serviva al VECCHIO
-  // motore a inversione: il filtro del parent invertiva visivamente anche gli
-  // iframe, e l'istanza dentro l'iframe li re-invertiva (doppia inversione).
-  // Col motore a rimappatura ogni frame va tematizzato per conto suo,
-  // altrimenti gli iframe cross-origin restano bianchi (bug: form di login di
-  // App Store Connect, un iframe di idmsa.apple.com). Ogni frame ha la sua
-  // istanza del content script (all_frames:true nei manifest), col suo
-  // rilevatore pageAlreadyThemed e il suo observer. Nota: l'override per-sito
-  // dentro un iframe usa l'hostname del FRAME (es. idmsa.apple.com), non
-  // quello della pagina che lo contiene.
-
-  if (document.readyState === "loading")
-    document.addEventListener("DOMContentLoaded", loadAndRender, { once: true });
-  else loadAndRender();
-  window.addEventListener("load", function () { loadAndRender(); }, { once: true });
-  [200, 700, 1600].forEach(function (ms) { setTimeout(loadAndRender, ms); });
-
-  if (api.storage && api.storage.onChanged) {
-    api.storage.onChanged.addListener(function (ch, area) { if (area === "local") loadAndRender(); });
-  }
-
-  /* ---------- Sentinella anti-regressione ----------
-   * Su una pagina che ABBIAMO scurito non deve esistere nessuno sfondo
-   * chiaro di grandi dimensioni: se ne compare uno, qualcosa ci e' sfuggito
-   * (race di framework, timing, API che non conosciamo - le web-app complesse
-   * ne inventano di continuo: capitato su ASC Analytics, card bianche una
-   * volta ogni tot cambi pagina). Invece di inseguire ogni singola causa,
-   * campioniamo una griglia di punti visibili: se troviamo uno sfondo chiaro
-   * non protetto da hover, facciamo ripartire una ripassata completa.
-   * Costo: ~30 getComputedStyle ogni 1.5s, zero in background. Se il chiaro
-   * non e' risolvibile (colore che non sappiamo parsare), backoff fino a 30s
-   * per non girare a vuoto. */
-  function sentinelCheck() {
-    if (!themed || document.hidden) return false;
-    var w = innerWidth, h = innerHeight;
-    if (!w || !h || !document.elementFromPoint) return false;
-    for (var i = 0; i < 30; i++) {
-      var x = (0.06 + 0.88 * ((i % 5) / 4)) * w;
-      var y = (0.06 + 0.88 * (Math.floor(i / 5) / 5)) * h;
-      var el = document.elementFromPoint(x, y), g = 0;
-      while (el && el.nodeType === 1 && g < 40) {
-        if (el.__notteHovering) break;      // zona protetta da hover: legittima
-        if (isSkipTag(el.tagName)) break;   // immagini/video/canvas: colori naturali
-        var cs2;
-        try { cs2 = getComputedStyle(el); } catch (e) { break; }
-        // Anche un gradiente chiaro sfuggito conta come "sporco" (i gradienti
-        // con url() invece sono immagini vere e restano com'e' - il backoff
-        // evita di girare a vuoto se non possiamo sistemarlo).
-        if (cs2.backgroundImage && cs2.backgroundImage.indexOf("url(") === -1 &&
-            gradientIsLight(cs2.backgroundImage)) { scheduleRetheme(); return true; }
-        var c = parseColor(cs2.backgroundColor);
-        if (c && c.a > 0.2) {
-          if (luminance(c) >= 150) { scheduleRetheme(); return true; }
-          break;
+      document.documentElement.setAttribute("data-notte-build", "v2.24-fast-reveal");
+    } catch (e) {
+    }
+    /* ---- Notte timing log (filter console by "Notte"). Harmless; remove later. ---- */
+    var NBG = true, themeReadyAt = null;
+    function nlog() {
+      if (!NBG) return;
+      try { var a = [].slice.call(arguments); a.unshift("[Notte +" + performance.now().toFixed(0) + "ms]"); console.log.apply(console, a); } catch (e) {}
+    }
+    var theme = makeTheme("dark");
+    var shadowRoots = [];
+    var fetchedHrefs = /* @__PURE__ */ Object.create(null);
+    var watcher = null;
+    var lastColorVars = { has: function() {
+      return false;
+    } };
+    var inline = createInlineManager(function() {
+      return theme;
+    }, function() {
+      return lastColorVars;
+    });
+    var loadingCover = true;
+    var pendingFetches = 0;
+    var coverSafety = null;
+    var coverStartTs = Date.now();
+    var lastActivityTs = Date.now();
+    // The cover now lifts on STYLESHEET readiness, not on the page's element
+    // churn. So the "quiet" window and minimum hold are short: they only need to
+    // absorb a burst of stylesheet loads / cross-origin fetches, not wait for a
+    // live app (Outlook Web) to stop adding DOM nodes. New nodes are themed by
+    // the cascade automatically and never needed the cover.
+    var COVER_QUIET = 250;
+    var COVER_MIN_HOLD = 250;
+    var COVER_HARD_CAP = 4e3;
+    injectAntiFlash(document);
+    nlog("cover injected (flat dark); readyState =", document.readyState);
+    injectNoTransition(document);
+    var NOTRANS_SETTLE = 900;
+    var lastProcessTs = Date.now();
+    var noTransTimer = null;
+    function armNoTransition() {
+      lastProcessTs = Date.now();
+      if (theme.mode === "dark") injectNoTransition(document);
+      if (!noTransTimer) scheduleNoTransRemoval();
+    }
+    function scheduleNoTransRemoval() {
+      if (noTransTimer) clearTimeout(noTransTimer);
+      noTransTimer = setTimeout(function() {
+        noTransTimer = null;
+        var quiet = Date.now() - lastProcessTs >= NOTRANS_SETTLE && !loadingCover;
+        if (quiet || theme.mode !== "dark") removeNoTransition(document);
+        else scheduleNoTransRemoval();
+      }, NOTRANS_SETTLE);
+    }
+    var coverObserver = null;
+    function liftCover() {
+      if (!loadingCover) return;
+      loadingCover = false;
+      nlog("★ COVER LIFTED — real colors visible. Held", (Date.now() - coverStartTs) + "ms;",
+        "theme was ready", themeReadyAt != null ? (Date.now() - themeReadyAt) + "ms earlier" : "n/a");
+      removeAntiFlash(document);
+      for (var i = 0; i < shadowRoots.length; i++) removeAntiFlash(shadowRoots[i]);
+      if (coverSafety) {
+        clearTimeout(coverSafety);
+        coverSafety = null;
+      }
+      stopCoverObserver();
+    }
+    function startCoverObserver() {
+      // Intentionally does nothing now. Previously this watched the whole DOM and
+      // treated EVERY added element as "activity", which reset the cover-lift
+      // timer — on a live app (Outlook Web) that kept the flat cover up for 2-3s
+      // even though the theme was already applied. New elements are themed by the
+      // cascade automatically, so they never needed the cover. The cover timer is
+      // now reset only by genuine STYLESHEET work: cross-origin fetches
+      // (pendingFetches) and stylesheet changes (the watcher's callback).
+    }
+    function stopCoverObserver() {
+      if (coverObserver) {
+        try {
+          coverObserver.disconnect();
+        } catch (e) {
         }
-        el = el.parentElement;
-        g++;
+        coverObserver = null;
       }
     }
-    return false;
-  }
-  // Controllo sentinella anticipato dopo raffiche di nodi nuovi (SPA che
-  // cambia pagina): senza, il bianco poteva restare visibile fino al
-  // prossimo giro da 1.5s. Debounced per non campionare a ogni mutazione.
-  var sentinelSoonTimer = null;
-  function sentinelSoon() {
-    if (sentinelSoonTimer) clearTimeout(sentinelSoonTimer);
-    sentinelSoonTimer = setTimeout(function () {
-      sentinelSoonTimer = null;
-      try { sentinelCheck(); } catch (e) {}
-    }, 350);
-  }
-
-  // Gli shadow root vengono registrati una volta e mai piu' rimossi. Su una
-  // SPA che crea e distrugge di continuo componenti con shadow DOM, l'array
-  // `shadowRoots` cresceva all'infinito: ogni entry tiene in vita il proprio
-  // sotto-albero (niente garbage collection) e resta osservata dal
-  // MutationObserver, che li tiene ancorati -> memoria e lavoro che salgono col
-  // tempo su schede tenute aperte a lungo (uno dei motivi del rallentamento
-  // progressivo su Chrome). Qui, periodicamente, scartiamo i root il cui host
-  // e' uscito dal DOM. Se ne abbiamo tolto qualcuno, ri-agganciamo l'observer
-  // ai soli root ancora vivi (disconnect() e' l'unico modo di smettere di
-  // osservare i detached e liberarli davvero).
-  function pruneShadowRoots() {
-    var removed = false;
-    for (var i = shadowRoots.length - 1; i >= 0; i--) {
-      var sr = shadowRoots[i], shHost = sr && sr.host;
-      if (!sr || (shHost && !shHost.isConnected)) { shadowRoots.splice(i, 1); removed = true; }
+    function noteCoverActivity() {
+      lastActivityTs = Date.now();
+      scheduleCoverLift();
     }
-    if (removed && observer) {
+    function scheduleCoverLift() {
+      if (!loadingCover) return;
+      if (coverSafety) clearTimeout(coverSafety);
+      coverSafety = setTimeout(function() {
+        coverSafety = null;
+        if (!loadingCover) return;
+        var now = Date.now();
+        // "interactive" is enough: the DOM is parsed and our theme sheet is in.
+        // We no longer wait for "complete" (window load), which on SPAs arrives
+        // late and needlessly held the cover.
+        var ready = document.readyState !== "loading";
+        var minHeld = now - coverStartTs >= COVER_MIN_HOLD;
+        var quiet = ready && minHeld && now - lastActivityTs >= COVER_QUIET && pendingFetches === 0;
+        var capped = now - coverStartTs >= COVER_HARD_CAP;
+        nlog("cover check: held=" + (now - coverStartTs) + "ms ready=" + ready +
+          " sheetQuietGap=" + (now - lastActivityTs) + "ms pendingFetches=" + pendingFetches +
+          " -> " + ((quiet || capped) ? ("LIFT (" + (capped ? "hard-cap" : "styles ready") + ")") : "HOLD"));
+        if (quiet || capped) liftCover();
+        else scheduleCoverLift();
+      }, COVER_QUIET);
+    }
+    setTimeout(liftCover, COVER_HARD_CAP);
+    function containerOf2(root) {
+      return root.head || (root.nodeType === 9 ? root.documentElement : root);
+    }
+    function ensureSheet(root, id) {
+      var container = containerOf2(root);
+      var el = container.querySelector ? container.querySelector("#" + id) : null;
+      if (!el) {
+        el = document.createElement("style");
+        el.id = id;
+        el.setAttribute("data-notte", "");
+      }
+      container.appendChild(el);
+      return el;
+    }
+    function removeSheet(root, id) {
+      var container = containerOf2(root);
+      var el = container && container.querySelector ? container.querySelector("#" + id) : null;
+      if (el && el.parentNode) el.parentNode.removeChild(el);
+    }
+    function collectVarDefsFrom(root, map) {
+      var col = collectSheets(root);
+      for (var i = 0; i < col.readable.length; i++) {
+        try {
+          collectVarDefs(col.readable[i].cssRules, map);
+        } catch (e) {
+        }
+      }
+    }
+    function buildOverride(root) {
+      var col = collectSheets(root);
+      var ctx = { out: [], cors: [], colorVars: lastColorVars };
+      for (var j = 0; j < col.readable.length; j++) {
+        try {
+          walkRules(col.readable[j].cssRules, theme, ctx);
+        } catch (e) {
+        }
+      }
+      return { css: ctx.out.join("\n"), fetch: col.unreadable.concat(ctx.cors) };
+    }
+    function processRoot(root) {
+      ensureBase(root);
+      var r = buildOverride(root);
+      ensureSheet(root, THEME_ID).textContent = r.css;
+      if (root === document && themeReadyAt == null && r.css.length) {
+        themeReadyAt = Date.now();
+        nlog("theme sheet ready (document): css bytes =", r.css.length, "| cross-origin sheets queued =", r.fetch.length);
+      }
+      if (root === document && r.fetch.length) fetchAndApply(r.fetch);
+    }
+    function fetchAndApply(hrefs) {
+      var fresh = [];
+      for (var i = 0; i < hrefs.length; i++) {
+        var h = hrefs[i];
+        if (h && !fetchedHrefs[h]) {
+          fetchedHrefs[h] = 1;
+          fresh.push(h);
+        }
+      }
+      if (!fresh.length) return;
+      pendingFetches++;
+      fetchCssText(fresh).then(function(results) {
+        try {
+          if (theme.mode !== "dark") return;
+          var ctx = { out: [], cors: [], colorVars: lastColorVars };
+          for (var i2 = 0; i2 < results.length; i2++) {
+            var res = results[i2];
+            if (!res || !res.text) continue;
+            var rules = parseCssText(res.text);
+            if (rules) {
+              try {
+                walkRules(rules, theme, ctx);
+              } catch (e) {
+              }
+            }
+          }
+          if (ctx.out.length) {
+            var el = ensureSheet(document, CORS_ID);
+            el.textContent += "\n" + ctx.out.join("\n");
+          }
+          if (ctx.cors.length) fetchAndApply(ctx.cors);
+        } finally {
+          pendingFetches--;
+          noteCoverActivity();
+        }
+      });
+    }
+    function process() {
+      if (theme.mode !== "dark") return;
+      scanShadowRoots(document, shadowRoots);
+      var varMap = {};
+      collectVarDefsFrom(document, varMap);
+      collectInlineVarDefs(document, varMap);
+      for (var k = 0; k < shadowRoots.length; k++) {
+        try {
+          collectVarDefsFrom(shadowRoots[k], varMap);
+          collectInlineVarDefs(shadowRoots[k], varMap);
+        } catch (e) {
+        }
+      }
+      lastColorVars = resolveColorVars(varMap);
+      processRoot(document);
+      for (var i = 0; i < shadowRoots.length; i++) {
+        try {
+          processRoot(shadowRoots[i]);
+        } catch (e) {
+        }
+      }
+      inline.refresh();
+      armNoTransition();
+    }
+    function applyTheme() {
+      theme.mode = "dark";
+      ensureBase(document);
+      inline.start();
+      process();
+      if (loadingCover) {
+        startCoverObserver();
+        scheduleCoverLift();
+      }
+      if (!watcher) watcher = createStylesheetWatcher(
+        function() {
+          noteCoverActivity();
+          process();
+        },
+        function() {
+          return loadingCover;
+        }
+        // loading -> batch (hidden); interactive -> theme before paint
+      );
+    }
+    function removeTheme() {
+      theme.mode = "off";
+      loadingCover = false;
+      if (coverSafety) {
+        clearTimeout(coverSafety);
+        coverSafety = null;
+      }
+      stopCoverObserver();
+      if (watcher) {
+        watcher.stop();
+        watcher = null;
+      }
+      inline.stop();
+      removeAntiFlash(document);
+      removeNoTransition(document);
+      if (noTransTimer) {
+        clearTimeout(noTransTimer);
+        noTransTimer = null;
+      }
+      removeBase(document);
+      removeSheet(document, THEME_ID);
+      removeSheet(document, CORS_ID);
+      for (var i = 0; i < shadowRoots.length; i++) {
+        removeAntiFlash(shadowRoots[i]);
+        removeBase(shadowRoots[i]);
+        removeSheet(shadowRoots[i], THEME_ID);
+      }
+    }
+    var autoDecision = null;
+    function decide2(s) {
+      if (s.dark[host] === false) return false;
+      if (Object.prototype.hasOwnProperty.call(s.overrides, host)) return s.overrides[host];
+      if (autoDecision === null) autoDecision = pageAlreadyThemed();
       try {
-        observer.disconnect();
-        observer.observe(document.documentElement, OBSERVE_OPTS);
-        for (var k = 0; k < shadowRoots.length; k++) observeRoot(shadowRoots[k]);
-      } catch (e) {}
+        document.documentElement.setAttribute("data-notte-auto", String(autoDecision));
+      } catch (e) {
+      }
+      return !autoDecision;
     }
-  }
-
-  var sentinelDelay = 1500;
-  function sentinelLoop() {
-    // Saltiamo solo il LAVORO mentre bailed e' true, ma NON interrompiamo la
-    // catena di setTimeout (un "return" qui la spegnerebbe per sempre, e con
-    // essa pruneShadowRoots, anche dopo che il breaker si e' ripreso).
-    if (!bailed) {
-      try { pruneShadowRoots(); } catch (e) {}
-      var dirty = false;
-      try { dirty = sentinelCheck(); } catch (e) {}
-      sentinelDelay = dirty ? Math.min(sentinelDelay * 2, 30000) : 1500;
+    function loadAndRender() {
+      try {
+        var p = api2.storage.local.get(DEFAULTS);
+        var go = function(s) {
+          if (decide2(merge(s))) applyTheme();
+          else removeTheme();
+        };
+        if (p && typeof p.then === "function") p.then(go).catch(function() {
+        });
+        else api2.storage.local.get(DEFAULTS, go);
+      } catch (e) {
+      }
     }
-    setTimeout(sentinelLoop, sentinelDelay);
-  }
-  setTimeout(sentinelLoop, 1500);
-
-  // Vedi hoverProtect(): protegge il testo quando il mouse attiva uno sfondo
-  // chiaro via :hover puro CSS, che altrimenti sfuggirebbe del tutto.
-  // Dentro uno shadow DOM l'evento che arriva al document viene RITARGHETTATO
-  // sull'host: e.target NON e' l'elemento vero sotto il mouse ma il contenitore
-  // dello shadow root, e il controllo dello sfondo chiaro falliva sempre (bug:
-  // hover del menu account di App Store Connect - che vive in shadow DOM -
-  // testo illeggibile). composedPath()[0] restituisce il bersaglio reale anche
-  // dentro gli shadow root (aperti; shadow-patch.js li forza tutti aperti).
-  function hoverTarget(e) {
-    try {
-      if (e.composedPath) { var p = e.composedPath(); if (p && p.length) return p[0]; }
-    } catch (err) {}
-    return e.target;
-  }
-  function onHoverOver(e) {
-    if (!themed) return;
-    sweepHover(); // rilascia le protezioni rimaste appese (vedi sweepHover)
-    var t = hoverTarget(e);
-    hoverProtect(t);
-    // Doppia rete di sicurezza sui tempi: (1) Safari puo' consegnare il
-    // mouseover PRIMA di aver applicato gli stili :hover; (2) molti siti
-    // animano lo sfondo dell'hover con una transition, per cui al primo
-    // controllo il colore e' ancora scuro e diventa chiaro solo dopo.
-    // Ricontrolliamo quindi piu' volte, solo finche' il mouse e' ancora li'.
-    var again = function () {
-      try { if (themed && t.matches && t.matches(":hover")) hoverProtect(t); } catch (err) {}
-    };
-    setTimeout(again, 0);
-    setTimeout(again, 150);
-    setTimeout(again, 400);
-  }
-  function onHoverOut(e) {
-    if (!themed) return;
-    hoverRestore(hoverTarget(e));
-    // Doppio controllo asincrono: dopo il mouseout gli stati :hover sono gia'
-    // aggiornati, quindi lo sweep libera anche contenitori non sulla catena
-    // del target (es. il menu appena chiuso).
-    setTimeout(sweepHover, 0);
-  }
-  // Attaccati al document E a ogni shadow root (vedi registerShadowRoot: i
-  // movimenti del mouse TRA elementi dentro uno shadow root non raggiungono
-  // mai i listener sul document per via del retargeting sull'host).
-  function attachHoverListeners(root) {
-    root.addEventListener("mouseover", onHoverOver, true);
-    root.addEventListener("mouseout", onHoverOut, true);
-  }
-  attachHoverListeners(document);
-  // Se il mouse esce dalla pagina o la finestra perde il focus non arriva
-  // nessun mouseover successivo: rilasciamo tutto esplicitamente.
-  document.addEventListener("mouseleave", function () { if (themed) sweepHover(); }, true);
-  window.addEventListener("blur", function () { if (themed) sweepHover(); });
-
-  /* ---------- Resync su selezione / focus ----------
-   * Alcuni siti (Outlook Web, sopratutto in Firefox) cambiano il colore di una
-   * riga SELEZIONATA / a fuoco tramite CSS di STATO che NON produce alcuna
-   * mutazione del DOM osservabile dal MutationObserver (es. regole legate a
-   * :focus/:focus-within, o riscritture interne che Firefox serve in modo
-   * diverso da Chrome). Risultato: la riga mantiene il nostro vecchio override
-   * scuro NEUTRO e la selezione/lo stato letto non si vede (bug verificato dal
-   * vivo su OWA Firefox: colore reale sotto = azzurro rgb(199,224,244), ma il
-   * nostro inline restava rgb(20,20,20)). Come gia' facciamo per l'hover
-   * (mouseover), ci agganciamo a click e focusin e RILEGGIAMO i colori del
-   * sotto-albero attorno al bersaglio: resyncEl toglie il nostro override,
-   * rilegge il colore vero (ora azzurro) e lo ri-scurisce in modo DISTINTO
-   * (banda d'accento), rendendo visibile la selezione. In Chrome, dove
-   * l'observer gia' cattura il cambio, questo e' un no-op (resyncEl non
-   * riscrive nulla se il colore non e' cambiato). */
-  // Ambito "riga" attorno a un bersaglio: il piu' vicino contenitore-riga, o,
-  // in mancanza, qualche livello di antenati.
-  function rowScopeOf(target) {
-    var scope = null;
-    try {
-      scope = target.closest &&
-        target.closest('[role="option"],[role="row"],[role="listitem"],[role="treeitem"],li,tr');
-    } catch (e) { scope = null; }
-    if (!scope) { scope = target; var up = 0; while (scope.parentElement && up < 6) { scope = scope.parentElement; up++; } }
-    return scope;
-  }
-  // La riga risincronizzata all'ultima interazione: quando la selezione si
-  // sposta, la riga PRECEDENTE perde lo stato SENZA mutazione DOM e, se non la
-  // rileggiamo, resta "bloccata" evidenziata (bug: tutte le righe sembrano
-  // selezionate). La memorizziamo e la ripassiamo al click successivo.
-  var lastResyncScope = null;
-  function resyncAround(target) {
-    if (!themed || !target || target.nodeType !== 1) return;
-    var scope = rowScopeOf(target);
-    if (lastResyncScope && lastResyncScope !== scope && lastResyncScope.isConnected) {
-      try { resyncSubtree(lastResyncScope); } catch (e) {}
+    var lastPath = location.pathname;
+    document.addEventListener("__notte_route_changed__", function() {
+      if (theme.mode !== "dark") return;
+      if (location.pathname === lastPath) return;
+      lastPath = location.pathname;
+      if (loadingCover) {
+        noteCoverActivity();
+        return;
+      }
+      loadingCover = true;
+      coverStartTs = Date.now();
+      lastActivityTs = Date.now();
+      injectAntiFlash(document);
+      for (var i = 0; i < shadowRoots.length; i++) {
+        try {
+          injectAntiFlash(shadowRoots[i]);
+        } catch (e) {
+        }
+      }
+      startCoverObserver();
+      setTimeout(liftCover, COVER_HARD_CAP);
+      process();
+      noteCoverActivity();
+    }, true);
+    document.addEventListener("__notte_shadow_attached__", function(e) {
+      var shHost = e.target;
+      if (!shHost || !shHost.shadowRoot) return;
+      var sr = shHost.shadowRoot;
+      if (shadowRoots.indexOf(sr) === -1) shadowRoots.push(sr);
+      if (loadingCover) {
+        injectAntiFlash(sr);
+        noteCoverActivity();
+      }
+      if (theme.mode === "dark") {
+        try {
+          processRoot(sr);
+        } catch (err) {
+        }
+      }
+    }, true);
+    if (document.readyState === "loading")
+      document.addEventListener("DOMContentLoaded", loadAndRender, { once: true });
+    else loadAndRender();
+    window.addEventListener("load", function() {
+      loadAndRender();
+    }, { once: true });
+    [200, 700, 1600].forEach(function(ms) {
+      setTimeout(loadAndRender, ms);
+    });
+    if (api2.storage && api2.storage.onChanged) {
+      api2.storage.onChanged.addListener(function(ch, area) {
+        if (area === "local") loadAndRender();
+      });
     }
-    lastResyncScope = scope;
-    try { resyncSubtree(scope); } catch (e) {}
-  }
-  function onSelectish(e) {
-    if (!themed) return;
-    var t;
-    try { t = (e.composedPath && e.composedPath()[0]) || e.target; } catch (er) { t = e.target; }
-    if (!t) return;
-    // Ritardo breve: lasciamo che il sito applichi lo stato prima di rileggere;
-    // due colpi coprono anche le transizioni CSS che ritardano il colore.
-    setTimeout(function () { resyncAround(t); }, 60);
-    setTimeout(function () { resyncAround(t); }, 260);
-  }
-  document.addEventListener("click", onSelectish, true);
-  document.addEventListener("focusin", onSelectish, true);
+  })();
 })();
