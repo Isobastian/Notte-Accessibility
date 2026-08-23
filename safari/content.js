@@ -341,14 +341,31 @@
     if (low === "transparent") return { r: 0, g: 0, b: 0, a: 0 };
     if (low === "currentcolor" || low === "inherit" || low === "initial" || low === "unset" || low === "revert" || low === "none") return null;
     if (str.charAt(0) === "#") return parseHex(str);
-    var m = str.match(/^rgba?\(([^)]+)\)$/i);
-    if (m) return parseRgb(m[1]);
-    var h = str.match(/^hsla?\(([^)]+)\)$/i);
-    if (h) return parseHsl(h[1]);
-    var o = str.match(/^oklch\(([^)]+)\)$/i);
-    if (o) return oklchToRgb(o[1]);
-    var k = str.match(/^color\(\s*(srgb|display-p3)\s+([^)]+)\)$/i);
-    if (k) return colorFuncToRgb(k[1].toLowerCase(), k[2]);
+    // Paren-aware extraction. The value may contain NESTED parens — most commonly
+    // a var() alpha in modern CSS-Color-4 syntax, e.g.
+    //   rgb(222 245 255 / var(--tw-bg-opacity, 1))   (Tailwind's default output).
+    // The old "[^)]+" regex stopped at the FIRST ")" (the var's), failed to match,
+    // and returned null — so these colors were skipped and their elements kept the
+    // site's light background (white buttons/panels on Tailwind sites). Use
+    // matchParen so the whole function body (nested parens included) is captured;
+    // parseRgb/parseHsl already handle space-separated channels and a var()/numeric
+    // alpha (alphaOf falls back to 1 for a non-numeric alpha).
+    var fnMatch = str.match(/^([a-zA-Z]+)\(/);
+    if (fnMatch) {
+      var openIdx = fnMatch[0].length - 1;
+      var closeIdx = matchParen(str, openIdx);
+      if (closeIdx !== str.length - 1) return null;   // trailing junk => not a single color
+      var fn = fnMatch[1].toLowerCase();
+      var inner = str.slice(openIdx + 1, closeIdx);
+      if (fn === "rgb" || fn === "rgba") return parseRgb(inner);
+      if (fn === "hsl" || fn === "hsla") return parseHsl(inner);
+      if (fn === "oklch") return oklchToRgb(inner);
+      if (fn === "color") {
+        var cm = inner.match(/^\s*(srgb|display-p3)\s+([\s\S]+)$/i);
+        return cm ? colorFuncToRgb(cm[1].toLowerCase(), cm[2]) : null;
+      }
+      return null;   // unsupported color function (lab/lch/hwb/oklab/…)
+    }
     if (Object.prototype.hasOwnProperty.call(NAMED, low)) return parseHex(NAMED[low]);
     return null;
   }
@@ -383,9 +400,20 @@
         S = Math.min(origS * 0.92, 92);
         target = 3;
       }
+      // v3 contrast tool: a user-set guaranteed minimum (AA = 4.5, AAA = 7) raises
+      // the contrast floor for every text colour. null => dark-mode default.
+      var refBg = AA_BG;
+      if (theme && theme.minContrast) {
+        if (theme.minContrast > target) target = theme.minContrast;
+        // Make the boost genuinely visible, not a bare pass: desaturate coloured
+        // text so it can approach white, and measure against a LIGHTER reference so
+        // the text is pushed brighter and also clears the target on lighter panels.
+        if (accent) S = Math.min(S, 45);
+        refBg = { r: 64, g: 64, b: 64 };
+      }
       Lp = Math.max(L, 90 - L * 0.6);
       var out = hslToRgb(H, S, Lp), guard = 0;
-      while (contrastRatio({ r: out[0], g: out[1], b: out[2] }, AA_BG) < target && Lp < 97 && guard < 64) {
+      while (contrastRatio({ r: out[0], g: out[1], b: out[2] }, refBg) < target && Lp < 98 && guard < 64) {
         Lp += 1.5;
         out = hslToRgb(H, S, Lp);
         guard++;
@@ -776,7 +804,17 @@
           var st = rule.style;
           for (var j = 0; j < st.length; j++) {
             var p = st[j];
-            if (p.length > 2 && p[0] === "-" && p[1] === "-") map[p] = st.getPropertyValue(p);
+            if (p.length > 2 && p[0] === "-" && p[1] === "-") {
+              var pv = st.getPropertyValue(p);
+              // Flattening custom-property defs is last-wins. Don't let a CSS-wide
+              // keyword (initial/inherit/unset/revert), set on some scoped selector,
+              // clobber a real (often colour) definition made elsewhere. A site that
+              // does `a{--link-color:var(--blue)}` then `a.Button{--link-color:initial}`
+              // would otherwise drop --link-color from the colour set, leaving every
+              // var(--link-color) text un-themed (real bug, DeepL links).
+              if (map[p] !== void 0 && /^(initial|inherit|unset|revert)$/i.test(String(pv).trim())) continue;
+              map[p] = pv;
+            }
           }
           if (rule.cssRules && rule.cssRules.length) collectVarDefs(rule.cssRules, map);
         } else if (rule.styleSheet) {
@@ -1333,8 +1371,10 @@
   var DEFAULTS = {
     overrides: {},
     // { "example.com": true|false }  — extension on/off per site
-    dark: {}
+    dark: {},
     // { "example.com": true|false }  — dark-mode feature on/off per site
+    contrast: {}
+    // { "example.com": "aa" | "aaa" }  — per-site guaranteed contrast target (v3)
     // Reserved for v3 (per-site profiles):
     // perSite: { "example.com": { minContrast: 4.5, fontScale: 1.2, ... } }
   };
@@ -1373,7 +1413,7 @@
   }
   function merge(s) {
     s = s || {};
-    return { overrides: s.overrides || {}, dark: s.dark || {} };
+    return { overrides: s.overrides || {}, dark: s.dark || {}, contrast: s.contrast || {} };
   }
 
   // src/index.js
@@ -1384,7 +1424,7 @@
     var THEME_ID = "__notte_theme__";
     var CORS_ID = "__notte_cors__";
     try {
-      document.documentElement.setAttribute("data-notte-build", "v2.24-fast-reveal");
+      document.documentElement.setAttribute("data-notte-build", "v2.28-var-keyword-fix");
     } catch (e) {
     }
     /* ---- Notte timing log (filter console by "Notte"). Harmless; remove later. ---- */
@@ -1669,7 +1709,12 @@
       try {
         var p = api2.storage.local.get(DEFAULTS);
         var go = function(s) {
-          if (decide2(merge(s))) applyTheme();
+          var m = merge(s);
+          // v3 contrast tool: map the per-site setting to a numeric target that
+          // remap() reads. Set BEFORE applyTheme so the first pass uses it.
+          var c = m.contrast[host];
+          theme.minContrast = c === "aaa" ? 7 : (c === "aa" ? 4.5 : null);
+          if (decide2(m)) applyTheme();
           else removeTheme();
         };
         if (p && typeof p.then === "function") p.then(go).catch(function() {

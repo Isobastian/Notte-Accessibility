@@ -12,7 +12,7 @@
   "use strict";
 
   var api = (typeof browser !== "undefined") ? browser : chrome;
-  var DEFAULTS = { overrides: {}, dark: {} };
+  var DEFAULTS = { overrides: {}, dark: {}, contrast: {} };
 
   // place: "bottom" renders the control full-width beneath the label (like sliders).
   var ITEMS = {
@@ -21,7 +21,7 @@
       { id: "warmth",     name: "Warm tint",       desc: "Cut blue light",                           type: "toggle", pill: true },
       { id: "links",      name: "Emphasize links", desc: "Underline every link",                     type: "toggle", pill: true },
       { id: "motion",     name: "Reduce motion",   desc: "Stop animations and autoplay",             type: "toggle", pill: true },
-      { id: "contrast",   name: "Contrast",        desc: "Boost text contrast",                      type: "value",  val: "AAA", w: 95, pill: true },
+      { id: "contrast",   name: "Contrast",        desc: "Boost text contrast (AA / AAA)",           type: "value",  val: "OFF", w: 95 },
       { divider: true },
       { id: "brightness", name: "Brightness",      desc: "Dim bright pages",                         type: "slider", pct: 62, pill: true },
       { id: "saturation", name: "Saturation",      desc: "Mute colours, or go fully grey",           type: "slider", pct: 54, pill: true },
@@ -115,7 +115,24 @@
     s.textContent = item.btn;
     return s;
   }
+  // Contrast is a 3-stop sliding switch (OFF left / AA middle / AAA right),
+  // built to match the on/off switches: same purple track, a knob that slides
+  // and is dark when OFF, light when active.
+  var C_DARK_KNOB = "radial-gradient(circle at 60% 38%,#332c66 0%,#16123a 48%,#0b0822 100%)";
+  var C_LIGHT_KNOB = "radial-gradient(circle at 68% 30%,#fff 0%,#cecbfb 48%,#9d97f6 100%)";
+  function contrastSwitchEl() {
+    var b = document.createElement("button");
+    b.className = "sw live";
+    b.setAttribute("role", "button");
+    b.style.width = "92px";
+    var k = document.createElement("span");
+    k.className = "knob";
+    k.style.cssText = "display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;color:#251e8b;";
+    b.appendChild(k);
+    return b;
+  }
   function controlEl(item) {
+    if (item.id === "contrast") return contrastSwitchEl(item);
     if (item.type === "toggle") return toggleEl(item);
     if (item.type === "value")  return valueEl(item);
     if (item.type === "slider") return sliderEl(item);
@@ -153,6 +170,7 @@
 
       var ctrl = controlEl(it);
       if (it.id === "dark") ctrl.id = "darkToggle";
+      if (it.id === "contrast") ctrl.id = "contrastCtrl";
       row.appendChild(ctrl);
       frag.appendChild(row);
     });
@@ -170,6 +188,7 @@
   function syncLive() {
     paint(el.master, extOn());
     paint(document.getElementById("darkToggle"), darkOn());
+    paintContrast();
   }
   function setExt(on)  { if (settings) { settings.overrides[host] = on; save(); paint(el.master, on); } }
   function setDark(on) { if (settings) { settings.dark[host] = on; save(); paint(document.getElementById("darkToggle"), on); } }
@@ -183,6 +202,46 @@
       t.addEventListener("click", function () { setDark(!darkOn()); });
     }
   }
+  /* ---------- contrast (per-site, OFF -> AA -> AAA) — first live v3 tool ---------- */
+  function contrastState() { return (settings && settings.contrast && settings.contrast[host]) || "off"; }
+  function contrastLabel(s) { return s === "aaa" ? "AAA" : (s === "aa" ? "AA" : "OFF"); }
+  function paintContrast() {
+    var c = document.getElementById("contrastCtrl");
+    if (!c) return;
+    var k = c.querySelector(".knob");
+    if (!k) return;
+    var s = contrastState();
+    // 3 stops in a 92px track (knob 41px): OFF left, AA middle, AAA right.
+    k.style.left = s === "aaa" ? "49px" : (s === "aa" ? "25px" : "2px");
+    k.style.background = s === "off" ? C_DARK_KNOB : C_LIGHT_KNOB;
+    k.textContent = s === "off" ? "" : (s === "aa" ? "AA" : "AAA");
+    c.setAttribute("aria-label", "Contrast: " + (s === "off" ? "off" : s.toUpperCase()));
+    c.setAttribute("aria-checked", String(s !== "off"));
+  }
+  function setContrast(next) {
+    if (!settings) return;
+    if (!settings.contrast) settings.contrast = {};
+    settings.contrast[host] = next;
+    save();
+    paintContrast();
+  }
+  function wireContrastRow() {
+    var c = document.getElementById("contrastCtrl");
+    if (c && !c._wired) {
+      c._wired = true;
+      c.tabIndex = 0;
+      var cycle = function () {
+        var s = contrastState();
+        setContrast(s === "off" ? "aa" : (s === "aa" ? "aaa" : "off"));
+      };
+      c.addEventListener("click", cycle);
+      c.addEventListener("keydown", function (e) {
+        if (e.key === " " || e.key === "Enter") { e.preventDefault(); cycle(); }
+      });
+    }
+    paintContrast();
+  }
+
   el.master.addEventListener("click", function () { setExt(!extOn()); });
   el.master.addEventListener("keydown", function (e) {
     if (e.key === " " || e.key === "Enter") { e.preventDefault(); setExt(!extOn()); }
@@ -198,7 +257,7 @@
     el.tabReading.tabIndex = onVision ? -1 : 0;
     el.panel.setAttribute("aria-labelledby", onVision ? "tab-vision" : "tab-reading");
     renderList(el.panel, ITEMS[tab]);
-    if (onVision) { wireDarkRow(); syncLive(); }
+    if (onVision) { wireDarkRow(); wireContrastRow(); syncLive(); }
     el.panel.scrollTop = 0;
   }
   el.tabVision.addEventListener("click", function () { selectTab("vision"); });
@@ -235,6 +294,7 @@
     settings = res[0] || DEFAULTS;
     if (!settings.overrides) settings.overrides = {};
     if (!settings.dark) settings.dark = {};
+    if (!settings.contrast) settings.contrast = {};
     host = res[1] || "";
     el.host.textContent = host || "this page";
     syncLive();
