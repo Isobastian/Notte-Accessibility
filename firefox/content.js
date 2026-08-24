@@ -395,6 +395,13 @@
         Lp = L >= 85 ? 11 + (100 - L) * 0.45 : 11 + L * 0.0794;
       }
     } else if (kind === "fg") {
+      var light = !!(theme && theme.mode === "light");
+      // On a bright page (dark mode OFF) we do NOT remap colours; the Contrast tool
+      // is the only thing that touches text, and only when a target is set. If it
+      // isn't, hand the text back exactly as the site shipped it.
+      if (light && !(theme && theme.minContrast)) {
+        return "rgba(" + rgb.r + "," + rgb.g + "," + rgb.b + "," + a + ")";
+      }
       var target = AA_MIN;
       if (accent) {
         S = Math.min(origS * 0.92, 92);
@@ -406,11 +413,25 @@
       if (theme && theme.minContrast) {
         if (theme.minContrast > target) target = theme.minContrast;
         // Make the boost genuinely visible, not a bare pass: desaturate coloured
-        // text so it can approach white, and measure against a LIGHTER reference so
-        // the text is pushed brighter and also clears the target on lighter panels.
+        // text so it can approach the reference extreme, and measure against a
+        // reference nudged toward mid so the text clears the target with margin.
         if (accent) S = Math.min(S, 45);
-        refBg = { r: 64, g: 64, b: 64 };
+        refBg = light ? { r: 236, g: 236, b: 236 } : { r: 64, g: 64, b: 64 };
       }
+      if (light) {
+        // Bright page: keep the light background and DARKEN text toward black until
+        // it clears the target against a light reference. Mirror of the dark path
+        // (which brightens toward white). Text that already passes is left as-is.
+        Lp = L;
+        var outL = hslToRgb(H, S, Lp), gL = 0;
+        while (contrastRatio({ r: outL[0], g: outL[1], b: outL[2] }, refBg) < target && Lp > 2 && gL < 64) {
+          Lp -= 1.5;
+          outL = hslToRgb(H, S, Lp);
+          gL++;
+        }
+        return "rgba(" + outL[0] + "," + outL[1] + "," + outL[2] + "," + a + ")";
+      }
+      // Dark page: brighten text toward white.
       Lp = Math.max(L, 90 - L * 0.6);
       var out = hslToRgb(H, S, Lp), guard = 0;
       while (contrastRatio({ r: out[0], g: out[1], b: out[2] }, refBg) < target && Lp < 98 && guard < 64) {
@@ -673,6 +694,11 @@
   function transformDeclaration(style, theme, colorVars) {
     if (!style) return [];
     colorVars = colorVars || EMPTY;
+    // On a bright page (mode "light") we only touch TEXT colours (the Contrast
+    // tool). Backgrounds, borders and shadows are left exactly as the site ships
+    // them, so the page stays bright. Custom properties still emit a fg variant so
+    // var()-driven text is covered, but not the bg/br variants.
+    var lightOnly = !!(theme && theme.mode === "light");
     var mi = style.getPropertyValue("mask-image") || style.getPropertyValue("-webkit-mask-image");
     var masked = !!mi && mi !== "none";
     var decls = [];
@@ -681,6 +707,7 @@
       var prop = style[i];
       var role = roleFor(prop, masked);
       if (role === null) continue;
+      if (lightOnly && role !== "fg" && role !== "auto") continue;
       var value = style.getPropertyValue(prop);
       if (!value) continue;
       if (role === "auto") {
@@ -688,23 +715,25 @@
         var c = parseColor(val);
         var chan2 = c ? null : parseChannelTriplet(val);
         if (c) {
-          decls.push(variantName("bg", prop) + ":" + remap(c, "bg", theme) + " !important");
+          if (!lightOnly) decls.push(variantName("bg", prop) + ":" + remap(c, "bg", theme) + " !important");
           decls.push(variantName("fg", prop) + ":" + remap(c, "fg", theme) + " !important");
-          decls.push(variantName("br", prop) + ":" + remap(c, "br", theme) + " !important");
+          if (!lightOnly) decls.push(variantName("br", prop) + ":" + remap(c, "br", theme) + " !important");
         } else if (chan2) {
-          var vb = channelVariant(chan2, "bg", theme), vf = channelVariant(chan2, "fg", theme), vr = channelVariant(chan2, "br", theme);
+          var vb = lightOnly ? null : channelVariant(chan2, "bg", theme), vf = channelVariant(chan2, "fg", theme), vr = lightOnly ? null : channelVariant(chan2, "br", theme);
           if (vb) decls.push(variantName("bg", prop) + ":" + vb + " !important");
           if (vf) decls.push(variantName("fg", prop) + ":" + vf + " !important");
           if (vr) decls.push(variantName("br", prop) + ":" + vr + " !important");
-          var ip = transformVarDef(value, theme);
-          if (ip !== value) decls.push(prop + ":" + ip + " !important");
+          if (!lightOnly) {
+            var ip = transformVarDef(value, theme);
+            if (ip !== value) decls.push(prop + ":" + ip + " !important");
+          }
         } else {
           var ref = firstVarRef(val);
           if (ref && colorVars.has(ref)) {
-            decls.push(variantName("bg", prop) + ":" + rewriteVars(val, "bg", colorVars) + " !important");
+            if (!lightOnly) decls.push(variantName("bg", prop) + ":" + rewriteVars(val, "bg", colorVars) + " !important");
             decls.push(variantName("fg", prop) + ":" + rewriteVars(val, "fg", colorVars) + " !important");
-            decls.push(variantName("br", prop) + ":" + rewriteVars(val, "br", colorVars) + " !important");
-          } else {
+            if (!lightOnly) decls.push(variantName("br", prop) + ":" + rewriteVars(val, "br", colorVars) + " !important");
+          } else if (!lightOnly) {
             var outv = transformVarDef(value, theme);
             if (outv !== value) decls.push(prop + ":" + outv + " !important");
           }
@@ -725,6 +754,7 @@
         var p2 = parsed[k].prop, v2 = parsed[k].value;
         var r2 = roleFor(p2, masked);
         if (r2 === null || r2 === "auto") continue;
+        if (lightOnly && r2 !== "fg") continue;
         if (v2.indexOf("var(") === -1) continue;
         if (emitted[p2]) continue;
         var o2 = rewriteVars(transformValue(v2, r2, theme), r2, colorVars);
@@ -761,8 +791,9 @@
     colorVars = colorVars || EMPTY;
     var out = [];
     var tag = el.tagName;
+    var lightOnly = !!(theme && theme.mode === "light");
     if (tag === "FONT") pushAttr(el, "color", "color", "fg", theme, colorVars, out);
-    pushAttr(el, "bgcolor", "background-color", "bg", theme, colorVars, out);
+    if (!lightOnly) pushAttr(el, "bgcolor", "background-color", "bg", theme, colorVars, out);
     return out;
   }
   function pushAttr(el, attr, prop, role, theme, colorVars, out) {
@@ -1059,6 +1090,92 @@
     if (el && el.parentNode) el.parentNode.removeChild(el);
   }
 
+  // src/engine/enhance.js
+  // The v3 accessibility tools that are NOT colour-remapping. They apply on BOTH
+  // dark and bright pages: some as a single injected rule sheet (text spacing,
+  // links, motion, focus, dim images, font), the page-global visual effects
+  // (brightness, saturation, warm tint) as one fixed overlay driven by
+  // backdrop-filter + a warm multiply layer. Contrast is handled by remap(), not
+  // here. Everything Notte injects carries data-notte so our own observers skip it.
+  var ADJUST_ID = "__notte_adjust__";
+  var OVERLAY_ID = "__notte_overlay__";
+  var TEXT_SEL = "body :where(p,li,a,span,td,th,h1,h2,h3,h4,h5,h6,label,button,input,select,textarea,blockquote,dd,dt,figcaption,em,strong,small,code,pre)";
+  function fontStack(name) {
+    // OpenDyslexic needs its font file bundled + an @font-face to truly apply;
+    // until then it falls back to the most legible widely-installed faces.
+    if (name === "dyslexic") return "'OpenDyslexic','Comic Sans MS',Verdana,Tahoma,sans-serif";
+    return "Verdana,Tahoma,Arial,sans-serif";
+  }
+  function buildAdjustCSS(theme) {
+    var css = "";
+    if (theme.fontScale) css += "html{font-size:" + (theme.fontScale * 100).toFixed(1) + "% !important;}";
+    if (theme.lineHeight) css += TEXT_SEL + "{line-height:" + theme.lineHeight.toFixed(2) + " !important;}";
+    if (theme.letterSpacing) css += TEXT_SEL + "{letter-spacing:" + theme.letterSpacing.toFixed(3) + "em !important;word-spacing:" + (theme.letterSpacing * 2).toFixed(3) + "em !important;}";
+    if (theme.underlineLinks) css += "a[href]{text-decoration:underline !important;text-underline-offset:2px !important;}";
+    if (theme.reduceMotion) css += "*,*::before,*::after{animation-duration:.001ms !important;animation-iteration-count:1 !important;animation-delay:0s !important;transition-duration:.001ms !important;transition-delay:0s !important;scroll-behavior:auto !important;}";
+    if (theme.focusOutline) css += ":focus,:focus-visible{outline:3px solid #ffbf00 !important;outline-offset:2px !important;}";
+    if (theme.dimImages != null) css += "img,video,picture,canvas,image{filter:brightness(" + (theme.dimImages / 100).toFixed(2) + ") !important;}";
+    if (theme.fontFamily) css += TEXT_SEL + "{font-family:" + fontStack(theme.fontFamily) + " !important;}";
+    return css;
+  }
+  function ensureAdjust(theme) {
+    var css = buildAdjustCSS(theme);
+    var el = document.getElementById(ADJUST_ID);
+    if (!css) {
+      if (el && el.parentNode) el.parentNode.removeChild(el);
+      return;
+    }
+    if (!el) {
+      var head = document.head || document.documentElement;
+      el = document.createElement("style");
+      el.id = ADJUST_ID;
+      el.setAttribute("data-notte", "");
+      head.appendChild(el);
+    }
+    if (el.textContent !== css) el.textContent = css;
+  }
+  function overlayStyle(theme) {
+    var filt = [];
+    if (theme.saturation != null) filt.push("saturate(" + (theme.saturation / 100).toFixed(2) + ")");
+    if (theme.brightness != null) filt.push("brightness(" + (theme.brightness / 100).toFixed(2) + ")");
+    var f = filt.join(" ");
+    var css = "position:fixed;top:0;left:0;right:0;bottom:0;pointer-events:none;z-index:2147483646;";
+    if (f) css += "backdrop-filter:" + f + ";-webkit-backdrop-filter:" + f + ";";
+    if (theme.warmth) css += "background:rgba(255,167,71,.16);mix-blend-mode:multiply;";
+    return css;
+  }
+  function ensureOverlay(theme) {
+    var need = theme.warmth || theme.brightness != null || theme.saturation != null;
+    var el = document.getElementById(OVERLAY_ID);
+    if (!need) {
+      if (el && el.parentNode) el.parentNode.removeChild(el);
+      return;
+    }
+    if (!el) {
+      el = document.createElement("div");
+      el.id = OVERLAY_ID;
+      el.setAttribute("data-notte", "");
+      el.setAttribute("aria-hidden", "true");
+      (document.documentElement || document.body).appendChild(el);
+    }
+    el.style.cssText = overlayStyle(theme);
+  }
+  function updateEnhancements(theme) {
+    try { ensureAdjust(theme); } catch (e) {}
+    try { ensureOverlay(theme); } catch (e) {}
+  }
+  function removeEnhancements() {
+    var a = document.getElementById(ADJUST_ID);
+    if (a && a.parentNode) a.parentNode.removeChild(a);
+    var o = document.getElementById(OVERLAY_ID);
+    if (o && o.parentNode) o.parentNode.removeChild(o);
+  }
+  function anyTool(t) {
+    return !!(t.minContrast || t.warmth || t.underlineLinks || t.reduceMotion || t.focusOutline ||
+      t.brightness != null || t.saturation != null || t.dimImages != null ||
+      t.fontScale || t.letterSpacing || t.lineHeight || t.fontFamily);
+  }
+
   // src/engine/detect.js
   function bgOf(el) {
     if (!el || el.nodeType !== 1) return null;
@@ -1200,10 +1317,12 @@
     }
     function process(el) {
       if (!el || el.nodeType !== 1 || !el.style) return;
+      if (el.getAttribute && el.getAttribute("data-notte") !== null) return;
       var tag = el.tagName;
       if (tag === "STYLE" || tag === "SCRIPT" || tag === "IMG" || tag === "VIDEO" || tag === "CANVAS" || tag === "IFRAME") return;
+      var lightOnly = getTheme().mode === "light";
       var decls = transformDeclaration(el.style, getTheme(), getColorVars());
-      var svg = transformSvgPaints(el, getColorVars());
+      var svg = lightOnly ? [] : transformSvgPaints(el, getColorVars());
       if (svg.length) decls = decls.concat(svg);
       var attrs = transformHtmlColorAttrs(el, getTheme(), getColorVars());
       if (attrs.length) decls = decls.concat(attrs);
@@ -1373,16 +1492,27 @@
     // { "example.com": true|false }  — extension on/off per site
     dark: {},
     // { "example.com": true|false }  — dark-mode feature on/off per site
-    contrast: {}
+    contrast: {},
     // { "example.com": "aa" | "aaa" }  — per-site guaranteed contrast target (v3)
-    // Reserved for v3 (per-site profiles):
-    // perSite: { "example.com": { minContrast: 4.5, fontScale: 1.2, ... } }
+    // --- v3 accessibility tools, per site (apply on dark AND bright pages) ---
+    warmth: {},      // { host: true }              warm tint (cut blue light)
+    links: {},       // { host: true }              underline every link
+    motion: {},      // { host: true }              reduce motion
+    focus: {},       // { host: true }              strong focus outline
+    brightness: {},  // { host: 0..100 }            <100 dims the page
+    saturation: {},  // { host: 0..100 }            <100 mutes colour (0 = grey)
+    dimimg: {},      // { host: 0..100 }            <100 dims images
+    textsize: {},    // { host: 0..100 }            >0 enlarges text
+    letter: {},      // { host: 0..100 }            >0 adds letter/word spacing
+    paragraph: {},   // { host: 0..100 }            >0 opens up line spacing
+    font: {}         // { host: "dyslexic" }        clearer/dyslexia-friendly font
   };
   function makeTheme(mode) {
     return {
       mode: mode || "dark",
-      // "dark" | "off"
-      // --- v3 accessibility hooks (inert in v2) ---
+      // "dark" | "light" | "off"  (light = bright page with tools applied)
+      // --- v3 accessibility hooks ---
+      warmth: null,
       minContrast: null,
       // number: guaranteed WCAG contrast target (AA 4.5 / AAA 7)
       brightness: null,
@@ -1413,7 +1543,16 @@
   }
   function merge(s) {
     s = s || {};
-    return { overrides: s.overrides || {}, dark: s.dark || {}, contrast: s.contrast || {} };
+    return {
+      overrides: s.overrides || {}, dark: s.dark || {}, contrast: s.contrast || {},
+      warmth: s.warmth || {}, links: s.links || {}, motion: s.motion || {}, focus: s.focus || {},
+      brightness: s.brightness || {}, saturation: s.saturation || {}, dimimg: s.dimimg || {},
+      textsize: s.textsize || {}, letter: s.letter || {}, paragraph: s.paragraph || {}, font: s.font || {}
+    };
+  }
+  function numAt(map, host) {
+    var v = map && map[host];
+    return typeof v === "number" ? v : null;
   }
 
   // src/index.js
@@ -1424,9 +1563,13 @@
     var THEME_ID = "__notte_theme__";
     var CORS_ID = "__notte_cors__";
     try {
-      document.documentElement.setAttribute("data-notte-build", "v2.28-var-keyword-fix");
+      document.documentElement.setAttribute("data-notte-build", "v3.0-tools-on-bright");
     } catch (e) {
     }
+    // On a bright page, the Contrast tool needs a text-transform pass; the other
+    // tools don't. lightContrast records whether that pass should run (contrast on
+    // AND the page is actually bright — never darken text on an already-dark page).
+    var lightContrast = false;
     /* ---- Notte timing log (filter console by "Notte"). Harmless; remove later. ---- */
     var NBG = true, themeReadyAt = null;
     function nlog() {
@@ -1576,7 +1719,10 @@
       return { css: ctx.out.join("\n"), fetch: col.unreadable.concat(ctx.cors) };
     }
     function processRoot(root) {
-      ensureBase(root);
+      // The dark base sheet (color-scheme:dark, dark scrollbars) belongs to dark
+      // mode only. On a bright page we never inject it, so the page stays light.
+      if (theme.mode === "dark") ensureBase(root);
+      else removeBase(root);
       var r = buildOverride(root);
       ensureSheet(root, THEME_ID).textContent = r.css;
       if (root === document && themeReadyAt == null && r.css.length) {
@@ -1598,7 +1744,7 @@
       pendingFetches++;
       fetchCssText(fresh).then(function(results) {
         try {
-          if (theme.mode !== "dark") return;
+          if (theme.mode === "off") return;
           var ctx = { out: [], cors: [], colorVars: lastColorVars };
           for (var i2 = 0; i2 < results.length; i2++) {
             var res = results[i2];
@@ -1623,7 +1769,11 @@
       });
     }
     function process() {
-      if (theme.mode !== "dark") return;
+      // Runs the colour-transform pass. Dark mode always. Bright ("light") mode
+      // only when the Contrast tool needs to darken text — the other bright-page
+      // tools are pure injected CSS and never need this pass.
+      if (theme.mode === "off") return;
+      if (theme.mode === "light" && !lightContrast) return;
       scanShadowRoots(document, shadowRoots);
       var varMap = {};
       collectVarDefsFrom(document, varMap);
@@ -1646,6 +1796,13 @@
       inline.refresh();
       armNoTransition();
     }
+    // Dropping the CORS override sheet + its fetch cache. Called only when the
+    // mode actually switches (dark <-> light), so already-fetched cross-origin
+    // sheets are re-fetched and re-transformed for the new mode.
+    function resetCors() {
+      try { removeSheet(document, CORS_ID); } catch (e) {}
+      fetchedHrefs = Object.create(null);
+    }
     function applyTheme() {
       theme.mode = "dark";
       ensureBase(document);
@@ -1665,8 +1822,54 @@
         }
         // loading -> batch (hidden); interactive -> theme before paint
       );
+      updateEnhancements(theme);
+    }
+    // Bright-page mode: the page keeps its own light colours. No dark cover, no
+    // dark base sheet. The Contrast tool (if on and the page really is bright)
+    // runs the text-transform pass to darken text; every other tool is applied by
+    // updateEnhancements() as injected CSS / the overlay. Works even when the only
+    // active tool is, say, bigger text — no colour work happens then.
+    function applyLight() {
+      theme.mode = "light";
+      loadingCover = false;
+      if (coverSafety) {
+        clearTimeout(coverSafety);
+        coverSafety = null;
+      }
+      stopCoverObserver();
+      removeAntiFlash(document);
+      removeNoTransition(document);
+      removeBase(document);
+      for (var i = 0; i < shadowRoots.length; i++) {
+        try {
+          removeAntiFlash(shadowRoots[i]);
+          removeBase(shadowRoots[i]);
+        } catch (e) {
+        }
+      }
+      if (lightContrast) {
+        inline.start();
+        process();
+        if (!watcher) watcher = createStylesheetWatcher(
+          function() { process(); },
+          function() { return false; }
+        );
+      } else {
+        if (watcher) {
+          watcher.stop();
+          watcher = null;
+        }
+        inline.stop();
+        removeSheet(document, THEME_ID);
+        removeSheet(document, CORS_ID);
+        for (var j = 0; j < shadowRoots.length; j++) {
+          try { removeSheet(shadowRoots[j], THEME_ID); } catch (e) {}
+        }
+      }
+      updateEnhancements(theme);
     }
     function removeTheme() {
+      removeEnhancements();
       theme.mode = "off";
       loadingCover = false;
       if (coverSafety) {
@@ -1710,11 +1913,41 @@
         var p = api2.storage.local.get(DEFAULTS);
         var go = function(s) {
           var m = merge(s);
-          // v3 contrast tool: map the per-site setting to a numeric target that
-          // remap() reads. Set BEFORE applyTheme so the first pass uses it.
+          // Map every per-site setting into the theme the engine reads. Done
+          // BEFORE dispatch so the first pass already reflects the tools.
           var c = m.contrast[host];
-          theme.minContrast = c === "aaa" ? 7 : (c === "aa" ? 4.5 : null);
-          if (decide2(m)) applyTheme();
+          theme.minContrast    = c === "aaa" ? 7 : (c === "aa" ? 4.5 : null);
+          theme.warmth         = m.warmth[host] ? true : null;
+          theme.underlineLinks = m.links[host] ? true : null;
+          theme.reduceMotion   = m.motion[host] ? true : null;
+          theme.focusOutline   = m.focus[host] ? true : null;
+          var br = numAt(m.brightness, host), sa = numAt(m.saturation, host), di = numAt(m.dimimg, host);
+          theme.brightness = (br != null && br < 100) ? br : null;
+          theme.saturation = (sa != null && sa < 100) ? sa : null;
+          theme.dimImages  = (di != null && di < 100) ? di : null;
+          var ts = numAt(m.textsize, host), ls = numAt(m.letter, host), pg = numAt(m.paragraph, host);
+          theme.fontScale     = (ts != null && ts > 0) ? (1 + ts / 100 * 0.8) : null;
+          theme.letterSpacing = (ls != null && ls > 0) ? (ls / 100 * 0.2) : null;
+          theme.lineHeight    = (pg != null && pg > 0) ? (1.5 + pg / 100 * 0.7) : null;
+          theme.fontFamily    = (m.font[host] && m.font[host] !== "off") ? m.font[host] : null;
+
+          // Dark wins. Otherwise, if any tool is on, run bright-page mode. The
+          // Contrast text-pass only fires on a genuinely bright page (never darken
+          // text on a page that already ships its own dark theme).
+          var want;
+          if (decide2(m)) {
+            want = "dark";
+            lightContrast = false;
+          } else if (anyTool(theme)) {
+            want = "light";
+            lightContrast = !!theme.minContrast && !pageAlreadyThemed();
+          } else {
+            want = "off";
+            lightContrast = false;
+          }
+          if (want !== "off" && want !== theme.mode) resetCors();
+          if (want === "dark") applyTheme();
+          else if (want === "light") applyLight();
           else removeTheme();
         };
         if (p && typeof p.then === "function") p.then(go).catch(function() {
@@ -1725,9 +1958,16 @@
     }
     var lastPath = location.pathname;
     document.addEventListener("__notte_route_changed__", function() {
-      if (theme.mode !== "dark") return;
+      if (theme.mode === "off") return;
       if (location.pathname === lastPath) return;
       lastPath = location.pathname;
+      if (theme.mode === "light") {
+        // Bright mode: no cover to re-arm. Re-run the text pass if Contrast is on,
+        // and make sure the injected tools survive the route change.
+        if (lightContrast) process();
+        updateEnhancements(theme);
+        return;
+      }
       if (loadingCover) {
         noteCoverActivity();
         return;
@@ -1756,7 +1996,7 @@
         injectAntiFlash(sr);
         noteCoverActivity();
       }
-      if (theme.mode === "dark") {
+      if (theme.mode === "dark" || (theme.mode === "light" && lightContrast)) {
         try {
           processRoot(sr);
         } catch (err) {
