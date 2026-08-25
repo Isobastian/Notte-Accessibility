@@ -50,7 +50,6 @@
       { id: "cursor",     name: "Large cursor",      desc: "Bigger, easier-to-see pointer",         type: "toggle", pill: true }
     ],
     profile: [
-      { id: "remember",   name: "Remember",  desc: "Save each site's settings",      type: "toggle", pill: true },
       { id: "preset",     name: "Preset",    desc: "One-click readability",          type: "obtn", btn: "Apply", pill: true },
       { id: "shortcuts",  name: "Shortcuts", desc: "Every toggle from the keyboard", type: "obtn", btn: "Set",   pill: true }
     ]

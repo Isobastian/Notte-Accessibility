@@ -576,6 +576,25 @@
             i = close + 1;
             continue;
           }
+          if (lname === "light-dark") {
+            // light-dark(A,B): A = light-theme colour, B = dark-theme colour.
+            // The engine forces color-scheme:dark, so the browser uses B — which is
+            // ALREADY the site's dark colour. Remapping B (a dark bg misread as fg by
+            // luminance) inverts it to a light colour: that was the DeepL tab bug
+            // (light text on light bg, ~1.02:1). Fix: remap only the light branch A;
+            // pass the dark branch B through verbatim so the site's dark theme shows.
+            var __ldInner = value.slice(k + 1, close);
+            var __ldc = topLevelComma(__ldInner);
+            if (__ldc !== -1) {
+              var __ldL = __ldInner.slice(0, __ldc);
+              var __ldR = __ldInner.slice(__ldc + 1);
+              var __ldLt = transformValue(__ldL, role, theme);
+              if (__ldLt !== __ldL) changed = true;
+              out += "light-dark(" + __ldLt + "," + __ldR + ")";
+              i = close + 1;
+              continue;
+            }
+          }
           if (COLOR_FUNCS[lname]) {
             var fc = parseColor(whole);
             if (fc) {
@@ -1583,6 +1602,23 @@
     var lastColorVars = { has: function() {
       return false;
     } };
+    // --- perf: skip redundant full rebuilds -------------------------------
+    // Rebuilding the override sheet re-walks every rule in every stylesheet and
+    // re-serialises a large CSS string the browser must then re-parse. Most
+    // triggers (SPA route changes, unrelated DOM mutations) change nothing about
+    // the colours, so skip the whole rebuild unless something relevant moved.
+    var cssDirty = true;               // a real CSSOM change happened -> must rebuild
+    var lastBuildSig = new WeakMap();  // per-root cheap signature of the last build
+    document.addEventListener("__notte_css_changed__", function() { cssDirty = true; }, true);
+    function buildSig(root) {
+      var col = collectSheets(root);
+      var total = 0;
+      for (var i = 0; i < col.readable.length; i++) {
+        try { total += col.readable[i].cssRules.length; } catch (e) {}
+      }
+      return col.readable.length + "|" + total + "|" + col.unreadable.length + "|" +
+        theme.mode + "|" + (theme.minContrast || 0) + "|" + ((lastColorVars && lastColorVars.size) || 0);
+    }
     var inline = createInlineManager(function() {
       return theme;
     }, function() {
@@ -1605,19 +1641,46 @@
     nlog("cover injected (flat dark); readyState =", document.readyState);
     injectNoTransition(document);
     var NOTRANS_SETTLE = 900;
+    var NOTRANS_HARD_MAX = 2500;
     var lastProcessTs = Date.now();
     var noTransTimer = null;
+    var noTransDeadline = null;
     function armNoTransition() {
       lastProcessTs = Date.now();
-      if (theme.mode === "dark") injectNoTransition(document);
+      if (theme.mode === "dark") {
+        injectNoTransition(document);
+        // Absolute safety net. The no-transition sheet disables EVERY CSS
+        // transition/animation on the page; it must never outlive the theming
+        // swap. An intermittent race in the quiet-chain used to leave it applied
+        // forever, freezing all site animations until a manual reload. This hard
+        // deadline guarantees it is gone within NOTRANS_HARD_MAX no matter what.
+        if (!noTransDeadline) {
+          noTransDeadline = setTimeout(function() {
+            noTransDeadline = null;
+            clearNoTransition();
+          }, NOTRANS_HARD_MAX);
+        }
+      }
       if (!noTransTimer) scheduleNoTransRemoval();
+    }
+    function clearNoTransition() {
+      if (noTransTimer) { clearTimeout(noTransTimer); noTransTimer = null; }
+      if (noTransDeadline) { clearTimeout(noTransDeadline); noTransDeadline = null; }
+      removeNoTransition(document);
+      for (var i = 0; i < shadowRoots.length; i++) {
+        try { removeNoTransition(shadowRoots[i]); } catch (e) {}
+      }
     }
     function scheduleNoTransRemoval() {
       if (noTransTimer) clearTimeout(noTransTimer);
       noTransTimer = setTimeout(function() {
         noTransTimer = null;
-        var quiet = Date.now() - lastProcessTs >= NOTRANS_SETTLE && !loadingCover;
-        if (quiet || theme.mode !== "dark") removeNoTransition(document);
+        // Removal no longer waits on loadingCover: the cover has its own
+        // lifecycle and could latch on some SPAs, which is exactly what kept this
+        // sheet frozen. Once the page has been quiet for NOTRANS_SETTLE the colour
+        // swap is settled and transitions can safely return.
+        var quiet = Date.now() - lastProcessTs >= NOTRANS_SETTLE;
+        if (quiet || theme.mode !== "dark") clearNoTransition();
         else scheduleNoTransRemoval();
       }, NOTRANS_SETTLE);
     }
@@ -1723,8 +1786,23 @@
       // mode only. On a bright page we never inject it, so the page stays light.
       if (theme.mode === "dark") ensureBase(root);
       else removeBase(root);
+      var themeSheet = ensureSheet(root, THEME_ID);
+      // Skip the rebuild entirely when nothing that affects the output changed:
+      // no CSSOM mutation since the last build (cssDirty) AND the cheap signature
+      // (sheet count, total rule count, cross-origin count, mode, contrast target,
+      // colour-var count) is unchanged. A miss could only happen if a rule's
+      // existing declaration were mutated in place with no CSSOM method call --
+      // which sites do not do and the engine never relied on catching.
+      var sig = buildSig(root);
+      if (!cssDirty && themeSheet.__notteLastCss != null && lastBuildSig.get(root) === sig) return;
       var r = buildOverride(root);
-      ensureSheet(root, THEME_ID).textContent = r.css;
+      // Setting textContent re-parses the whole (large) sheet, so only write when
+      // the produced CSS actually differs from what is already applied.
+      if (themeSheet.__notteLastCss !== r.css) {
+        themeSheet.textContent = r.css;
+        themeSheet.__notteLastCss = r.css;
+      }
+      lastBuildSig.set(root, sig);
       if (root === document && themeReadyAt == null && r.css.length) {
         themeReadyAt = Date.now();
         nlog("theme sheet ready (document): css bytes =", r.css.length, "| cross-origin sheets queued =", r.fetch.length);
@@ -1786,15 +1864,22 @@
         }
       }
       lastColorVars = resolveColorVars(varMap);
-      processRoot(document);
-      for (var i = 0; i < shadowRoots.length; i++) {
-        try {
-          processRoot(shadowRoots[i]);
-        } catch (e) {
+      try {
+        processRoot(document);
+        for (var i = 0; i < shadowRoots.length; i++) {
+          try {
+            processRoot(shadowRoots[i]);
+          } catch (e) {
+          }
         }
+        inline.refresh();
+      } finally {
+        // armNoTransition() re-arms the no-transition removal timers; it must run
+        // on every pass, otherwise a throw above would orphan the sheet forever.
+        armNoTransition();
+        // Consume the dirty flag now that this pass has (re)built every root.
+        cssDirty = false;
       }
-      inline.refresh();
-      armNoTransition();
     }
     // Dropping the CORS override sheet + its fetch cache. Called only when the
     // mode actually switches (dark <-> light), so already-fetched cross-origin

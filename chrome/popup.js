@@ -31,26 +31,25 @@
       { id: "warmth",     name: "Warm tint",       desc: "Cut blue light",                            type: "toggle", live: true, key: "warmth" },
       { id: "links",      name: "Emphasize links", desc: "Underline every link",                      type: "toggle", live: true, key: "links" },
       { id: "motion",     name: "Reduce motion",   desc: "Stop animations and autoplay",             type: "toggle", live: true, key: "motion" },
+      { id: "focus",      name: "Strong focus",    desc: "Make keyboard focus obvious",              type: "toggle", live: true, key: "focus" },
       { id: "contrast",   name: "Contrast",        desc: "Boost text contrast (AAA)",                type: "value",  live: true, val: "OFF", w: 95 },
       { divider: true },
       { id: "brightness", name: "Brightness",      desc: "Dim bright pages",                         type: "slider", live: true, key: "brightness", off: 100 },
       { id: "saturation", name: "Saturation",      desc: "Mute colours, or go fully grey",           type: "slider", live: true, key: "saturation", off: 100 },
-      { id: "focus",      name: "Strong focus",    desc: "Make keyboard focus obvious",              type: "toggle", live: true, key: "focus" },
       { id: "dimimg",     name: "Dim images",      desc: "Soften bright or busy images",             type: "slider", live: true, key: "dimimg", off: 100 }
     ],
     reading: [
       { id: "readaloud",  name: "Read aloud",        desc: "Hear any page read aloud",              type: "toggle", pill: true },
       { id: "ruler",      name: "Reading ruler",     desc: "Highlight the line you're on",          type: "toggle", pill: true },
+      { id: "magnifier",  name: "Magnifier",         desc: "Cursor-following lens (hold Alt)",      type: "toggle", pill: true },
+      { id: "cursor",     name: "Large cursor",      desc: "Bigger, easier-to-see pointer",         type: "toggle", pill: true },
       { divider: true },
       { id: "textsize",   name: "Text size",         desc: "Enlarge text on any site",              type: "slider", live: true, key: "textsize", off: 0 },
       { id: "letter",     name: "Letter spacing",    desc: "Space out letters and words",           type: "slider", live: true, key: "letter", off: 0 },
       { id: "paragraph",  name: "Paragraph spacing", desc: "Add space between lines",               type: "slider", live: true, key: "paragraph", off: 0 },
       { id: "font",       name: "Font",              desc: "Clearer, dyslexia-friendly fonts",      type: "value", live: true, val: "Dyslexic", place: "bottom" },
-      { id: "magnifier",  name: "Magnifier",         desc: "Cursor-following lens (hold Alt)",      type: "toggle", pill: true },
-      { id: "cursor",     name: "Large cursor",      desc: "Bigger, easier-to-see pointer",         type: "toggle", pill: true }
     ],
     profile: [
-      { id: "remember",   name: "Remember",  desc: "Save each site's settings",      type: "toggle", pill: true },
       { id: "preset",     name: "Preset",    desc: "One-click readability",          type: "obtn", btn: "Apply", pill: true },
       { id: "shortcuts",  name: "Shortcuts", desc: "Every toggle from the keyboard", type: "obtn", btn: "Set",   pill: true }
     ]
@@ -128,19 +127,12 @@
     s.textContent = item.btn;
     return s;
   }
-  // Contrast is a two-stop sliding switch (OFF left / AAA right), built to match
-  // the on/off switches: same purple track, a knob that slides and is dark when
-  // OFF, light when active.
-  var C_DARK_KNOB = "radial-gradient(circle at 60% 38%,#332c66 0%,#16123a 48%,#0b0822 100%)";
-  var C_LIGHT_KNOB = "radial-gradient(circle at 68% 30%,#fff 0%,#cecbfb 48%,#9d97f6 100%)";
   function contrastSwitchEl() {
     var b = document.createElement("button");
     b.className = "sw live";
-    b.setAttribute("role", "button");
-    b.style.width = "92px";
+    b.setAttribute("role", "switch");
     var k = document.createElement("span");
     k.className = "knob";
-    k.style.cssText = "display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;color:#251e8b;";
     b.appendChild(k);
     return b;
   }
@@ -298,13 +290,8 @@
   function paintContrast() {
     var c = document.getElementById("contrastCtrl");
     if (!c) return;
-    var k = c.querySelector(".knob");
-    if (!k) return;
     var on = contrastState() !== "off";
-    // Two stops in the 92px track (knob 41px): OFF left, AAA right.
-    k.style.left = on ? "49px" : "2px";
-    k.style.background = on ? C_LIGHT_KNOB : C_DARK_KNOB;
-    k.textContent = on ? "AAA" : "";
+    c.classList.toggle("on", on);   // shared .sw.on CSS slides + recolours the knob
     c.setAttribute("aria-label", "Contrast: " + (on ? "AAA" : "off"));
     c.setAttribute("aria-checked", String(on));
   }
