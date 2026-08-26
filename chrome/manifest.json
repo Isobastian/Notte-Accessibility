@@ -11,28 +11,56 @@
     "256": "images/icon-256.png",
     "512": "images/icon-512.png"
   },
-  "permissions": ["storage", "activeTab"],
-  "host_permissions": ["<all_urls>"],
+  "permissions": [
+    "storage",
+    "activeTab"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
   "background": {
     "service_worker": "background.js"
   },
   "content_scripts": [
     {
-      "matches": ["<all_urls>"],
-      "js": ["shadow-patch.js"],
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "shadow-patch.js"
+      ],
       "run_at": "document_start",
       "all_frames": true,
       "world": "MAIN"
     },
     {
-      "matches": ["<all_urls>"],
-      "js": ["content.js"],
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "content.js"
+      ],
       "run_at": "document_start",
       "all_frames": true
     }
   ],
   "action": {
     "default_popup": "popup.html",
-    "default_icon": { "48": "images/icon-48.png", "96": "images/icon-96.png", "128": "images/icon-128.png" }
-  }
+    "default_icon": {
+      "48": "images/icon-48.png",
+      "96": "images/icon-96.png",
+      "128": "images/icon-128.png"
+    }
+  },
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "fonts/opendyslexic-regular.woff2",
+        "fonts/opendyslexic-bold.woff2"
+      ],
+      "matches": [
+        "<all_urls>"
+      ]
+    }
+  ]
 }

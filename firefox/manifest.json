@@ -19,7 +19,9 @@
     "<all_urls>"
   ],
   "background": {
-    "scripts": ["background.js"]
+    "scripts": [
+      "background.js"
+    ]
   },
   "content_scripts": [
     {
@@ -57,11 +59,24 @@
       "id": "notte-darkmode@sebastian",
       "strict_min_version": "128.0",
       "data_collection_permissions": {
-        "required": ["none"]
+        "required": [
+          "none"
+        ]
       }
     },
     "gecko_android": {
       "strict_min_version": "128.0"
     }
-  }
+  },
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "fonts/opendyslexic-regular.woff2",
+        "fonts/opendyslexic-bold.woff2"
+      ],
+      "matches": [
+        "<all_urls>"
+      ]
+    }
+  ]
 }

@@ -18,6 +18,19 @@
   "use strict";
 
   var api = (typeof browser !== "undefined") ? browser : chrome;
+
+  // Focus rings show only while navigating by keyboard: ONLY the navigation keys
+  // turn it on, and any pointer interaction turns it off. (Safari otherwise
+  // renders :focus-visible on click and on the popup's initial focus.)
+  window.addEventListener("keydown", function (e) {
+    if (e && (e.key === "Tab" || (e.key && e.key.indexOf("Arrow") === 0))) {
+      try { document.body.classList.add("kbd"); } catch (_) {}
+    }
+  }, true);
+  var _clearKbd = function () { try { document.body.classList.remove("kbd"); } catch (_) {} };
+  window.addEventListener("mousedown", _clearKbd, true);
+  window.addEventListener("pointerdown", _clearKbd, true);
+  window.addEventListener("touchstart", _clearKbd, true);
   var KEYS = ["overrides", "dark", "contrast", "warmth", "links", "motion", "focus",
     "brightness", "saturation", "dimimg", "textsize", "letter", "paragraph", "font"];
   var DEFAULTS = {};
@@ -31,23 +44,23 @@
       { id: "warmth",     name: "Warm tint",       desc: "Cut blue light",                            type: "toggle", live: true, key: "warmth" },
       { id: "links",      name: "Emphasize links", desc: "Underline every link",                      type: "toggle", live: true, key: "links" },
       { id: "motion",     name: "Reduce motion",   desc: "Stop animations and autoplay",             type: "toggle", live: true, key: "motion" },
+      { id: "focus",      name: "Strong focus",    desc: "Make keyboard focus obvious",              type: "toggle", live: true, key: "focus" },
       { id: "contrast",   name: "Contrast",        desc: "Boost text contrast (AAA)",                type: "value",  live: true, val: "OFF", w: 95 },
       { divider: true },
       { id: "brightness", name: "Brightness",      desc: "Dim bright pages",                         type: "slider", live: true, key: "brightness", off: 100 },
       { id: "saturation", name: "Saturation",      desc: "Mute colours, or go fully grey",           type: "slider", live: true, key: "saturation", off: 100 },
-      { id: "focus",      name: "Strong focus",    desc: "Make keyboard focus obvious",              type: "toggle", live: true, key: "focus" },
       { id: "dimimg",     name: "Dim images",      desc: "Soften bright or busy images",             type: "slider", live: true, key: "dimimg", off: 100 }
     ],
     reading: [
+      { id: "font",       name: "Dyslexia Font",     desc: "Clearer, dyslexia-friendly",            type: "toggle", live: true },
       { id: "readaloud",  name: "Read aloud",        desc: "Hear any page read aloud",              type: "toggle", pill: true },
       { id: "ruler",      name: "Reading ruler",     desc: "Highlight the line you're on",          type: "toggle", pill: true },
+      { id: "magnifier",  name: "Magnifier",         desc: "Cursor-following lens (hold Alt)",      type: "toggle", pill: true },
+      { id: "cursor",     name: "Large cursor",      desc: "Bigger, easier-to-see pointer",         type: "toggle", pill: true },
       { divider: true },
       { id: "textsize",   name: "Text size",         desc: "Enlarge text on any site",              type: "slider", live: true, key: "textsize", off: 0 },
       { id: "letter",     name: "Letter spacing",    desc: "Space out letters and words",           type: "slider", live: true, key: "letter", off: 0 },
-      { id: "paragraph",  name: "Paragraph spacing", desc: "Add space between lines",               type: "slider", live: true, key: "paragraph", off: 0 },
-      { id: "font",       name: "Font",              desc: "Clearer, dyslexia-friendly fonts",      type: "value", live: true, val: "Dyslexic", place: "bottom" },
-      { id: "magnifier",  name: "Magnifier",         desc: "Cursor-following lens (hold Alt)",      type: "toggle", pill: true },
-      { id: "cursor",     name: "Large cursor",      desc: "Bigger, easier-to-see pointer",         type: "toggle", pill: true }
+      { id: "paragraph",  name: "Paragraph spacing", desc: "Add space between lines",               type: "slider", live: true, key: "paragraph", off: 0 }
     ],
     profile: [
       { id: "preset",     name: "Preset",    desc: "One-click readability",          type: "obtn", btn: "Apply", pill: true },
@@ -55,7 +68,7 @@
     ]
   };
 
-  var host = "", settings = null, currentTab = "vision";
+  var host = "", settings = null, currentTab = "vision", activeTabId = null;
 
   var el = {
     host: document.getElementById("host"),
@@ -78,12 +91,21 @@
       } catch (e) { resolve(DEFAULTS); }
     });
   }
-  function save() { try { api.storage.local.set(settings); } catch (e) {} }
+  function save() {
+    try { api.storage.local.set(settings); } catch (e) {}
+    if (activeTabId != null) {
+      try {
+        var r = api.tabs.sendMessage(activeTabId, { type: "notte-apply" });
+        if (r && typeof r.then === "function") r.catch(function () {});
+      } catch (e) {}
+    }
+  }
   function getActiveHost() {
     return new Promise(function (resolve) {
       try {
         var p = api.tabs.query({ active: true, currentWindow: true });
         var handle = function (tabs) {
+          if (tabs && tabs[0]) activeTabId = tabs[0].id;
           var url = (tabs && tabs[0] && tabs[0].url) || "";
           try { resolve(new URL(url).hostname || ""); } catch (e) { resolve(""); }
         };
@@ -127,19 +149,12 @@
     s.textContent = item.btn;
     return s;
   }
-  // Contrast is a two-stop sliding switch (OFF left / AAA right), built to match
-  // the on/off switches: same purple track, a knob that slides and is dark when
-  // OFF, light when active.
-  var C_DARK_KNOB = "radial-gradient(circle at 60% 38%,#332c66 0%,#16123a 48%,#0b0822 100%)";
-  var C_LIGHT_KNOB = "radial-gradient(circle at 68% 30%,#fff 0%,#cecbfb 48%,#9d97f6 100%)";
   function contrastSwitchEl() {
     var b = document.createElement("button");
     b.className = "sw live";
-    b.setAttribute("role", "button");
-    b.style.width = "92px";
+    b.setAttribute("role", "switch");
     var k = document.createElement("span");
     k.className = "knob";
-    k.style.cssText = "display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;color:#251e8b;";
     b.appendChild(k);
     return b;
   }
@@ -297,13 +312,8 @@
   function paintContrast() {
     var c = document.getElementById("contrastCtrl");
     if (!c) return;
-    var k = c.querySelector(".knob");
-    if (!k) return;
     var on = contrastState() !== "off";
-    // Two stops in the 92px track (knob 41px): OFF left, AAA right.
-    k.style.left = on ? "49px" : "2px";
-    k.style.background = on ? C_LIGHT_KNOB : C_DARK_KNOB;
-    k.textContent = on ? "AAA" : "";
+    c.classList.toggle("on", on);   // shared .sw.on CSS slides + recolours the knob
     c.setAttribute("aria-label", "Contrast: " + (on ? "AAA" : "off"));
     c.setAttribute("aria-checked", String(on));
   }
@@ -333,12 +343,9 @@
   function paintFont() {
     var c = document.getElementById("fontCtrl");
     if (!c) return;
-    var k = c.querySelector(".knob");
-    if (!k) return;
     var on = fontState() !== "off";
-    k.textContent = on ? "Dyslexic" : "OFF";
     c.classList.toggle("on", on);
-    c.setAttribute("aria-label", "Font: " + (on ? "dyslexia-friendly" : "site default"));
+    c.setAttribute("aria-label", "Dyslexia font: " + (on ? "on" : "off"));
     c.setAttribute("aria-checked", String(on));
   }
   function setFont(v) {
@@ -352,14 +359,12 @@
     var c = document.getElementById("fontCtrl");
     if (c && !c._wired) {
       c._wired = true;
-      c.tabIndex = 0;
+      c.classList.add("live");
       c.style.cursor = "pointer";
-      c.classList.remove("deact");
-      c.setAttribute("role", "button");
-      var cycle = function () { setFont(fontState() === "off" ? "dyslexic" : "off"); };
-      c.addEventListener("click", cycle);
+      var flip = function () { setFont(fontState() === "off" ? "dyslexic" : "off"); };
+      c.addEventListener("click", flip);
       c.addEventListener("keydown", function (e) {
-        if (e.key === " " || e.key === "Enter") { e.preventDefault(); cycle(); }
+        if (e.key === " " || e.key === "Enter") { e.preventDefault(); flip(); }
       });
     }
     paintFont();

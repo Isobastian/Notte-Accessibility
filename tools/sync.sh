@@ -21,6 +21,11 @@ for B in firefox safari; do
   mkdir -p "$ROOT/$B/images"
   rm -f "$ROOT/$B/images/"*.png
   cp "$ROOT/chrome/images/"*.png "$ROOT/$B/images/"
+  # Bundled font (same rule: copy individual files, never a dir into a dir).
+  mkdir -p "$ROOT/$B/fonts"
+  rm -f "$ROOT/$B/fonts/"*.woff2
+  cp "$ROOT/chrome/fonts/"*.woff2 "$ROOT/$B/fonts/"
+  cp "$ROOT/chrome/fonts/OFL.txt" "$ROOT/$B/fonts/" 2>/dev/null || true
   echo "synced: $B"
 done
 echo "Done. The manifest.json files are NOT touched (they differ per browser)."

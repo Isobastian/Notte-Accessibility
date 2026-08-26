@@ -18,6 +18,19 @@
   "use strict";
 
   var api = (typeof browser !== "undefined") ? browser : chrome;
+
+  // Focus rings show only while navigating by keyboard: ONLY the navigation keys
+  // turn it on, and any pointer interaction turns it off. (Safari otherwise
+  // renders :focus-visible on click and on the popup's initial focus.)
+  window.addEventListener("keydown", function (e) {
+    if (e && (e.key === "Tab" || (e.key && e.key.indexOf("Arrow") === 0))) {
+      try { document.body.classList.add("kbd"); } catch (_) {}
+    }
+  }, true);
+  var _clearKbd = function () { try { document.body.classList.remove("kbd"); } catch (_) {} };
+  window.addEventListener("mousedown", _clearKbd, true);
+  window.addEventListener("pointerdown", _clearKbd, true);
+  window.addEventListener("touchstart", _clearKbd, true);
   var KEYS = ["overrides", "dark", "contrast", "warmth", "links", "motion", "focus",
     "brightness", "saturation", "dimimg", "textsize", "letter", "paragraph", "font"];
   var DEFAULTS = {};
@@ -39,6 +52,7 @@
       { id: "dimimg",     name: "Dim images",      desc: "Soften bright or busy images",             type: "slider", live: true, key: "dimimg", off: 100 }
     ],
     reading: [
+      { id: "font",       name: "Dyslexia Font",     desc: "Clearer, dyslexia-friendly",            type: "toggle", live: true },
       { id: "readaloud",  name: "Read aloud",        desc: "Hear any page read aloud",              type: "toggle", pill: true },
       { id: "ruler",      name: "Reading ruler",     desc: "Highlight the line you're on",          type: "toggle", pill: true },
       { id: "magnifier",  name: "Magnifier",         desc: "Cursor-following lens (hold Alt)",      type: "toggle", pill: true },
@@ -46,8 +60,7 @@
       { divider: true },
       { id: "textsize",   name: "Text size",         desc: "Enlarge text on any site",              type: "slider", live: true, key: "textsize", off: 0 },
       { id: "letter",     name: "Letter spacing",    desc: "Space out letters and words",           type: "slider", live: true, key: "letter", off: 0 },
-      { id: "paragraph",  name: "Paragraph spacing", desc: "Add space between lines",               type: "slider", live: true, key: "paragraph", off: 0 },
-      { id: "font",       name: "Font",              desc: "Clearer, dyslexia-friendly fonts",      type: "value", live: true, val: "Dyslexic", place: "bottom" },
+      { id: "paragraph",  name: "Paragraph spacing", desc: "Add space between lines",               type: "slider", live: true, key: "paragraph", off: 0 }
     ],
     profile: [
       { id: "preset",     name: "Preset",    desc: "One-click readability",          type: "obtn", btn: "Apply", pill: true },
@@ -55,7 +68,7 @@
     ]
   };
 
-  var host = "", settings = null, currentTab = "vision";
+  var host = "", settings = null, currentTab = "vision", activeTabId = null;
 
   var el = {
     host: document.getElementById("host"),
@@ -78,12 +91,21 @@
       } catch (e) { resolve(DEFAULTS); }
     });
   }
-  function save() { try { api.storage.local.set(settings); } catch (e) {} }
+  function save() {
+    try { api.storage.local.set(settings); } catch (e) {}
+    if (activeTabId != null) {
+      try {
+        var r = api.tabs.sendMessage(activeTabId, { type: "notte-apply" });
+        if (r && typeof r.then === "function") r.catch(function () {});
+      } catch (e) {}
+    }
+  }
   function getActiveHost() {
     return new Promise(function (resolve) {
       try {
         var p = api.tabs.query({ active: true, currentWindow: true });
         var handle = function (tabs) {
+          if (tabs && tabs[0]) activeTabId = tabs[0].id;
           var url = (tabs && tabs[0] && tabs[0].url) || "";
           try { resolve(new URL(url).hostname || ""); } catch (e) { resolve(""); }
         };
@@ -321,12 +343,9 @@
   function paintFont() {
     var c = document.getElementById("fontCtrl");
     if (!c) return;
-    var k = c.querySelector(".knob");
-    if (!k) return;
     var on = fontState() !== "off";
-    k.textContent = on ? "Dyslexic" : "OFF";
     c.classList.toggle("on", on);
-    c.setAttribute("aria-label", "Font: " + (on ? "dyslexia-friendly" : "site default"));
+    c.setAttribute("aria-label", "Dyslexia font: " + (on ? "on" : "off"));
     c.setAttribute("aria-checked", String(on));
   }
   function setFont(v) {
@@ -340,14 +359,12 @@
     var c = document.getElementById("fontCtrl");
     if (c && !c._wired) {
       c._wired = true;
-      c.tabIndex = 0;
+      c.classList.add("live");
       c.style.cursor = "pointer";
-      c.classList.remove("deact");
-      c.setAttribute("role", "button");
-      var cycle = function () { setFont(fontState() === "off" ? "dyslexic" : "off"); };
-      c.addEventListener("click", cycle);
+      var flip = function () { setFont(fontState() === "off" ? "dyslexic" : "off"); };
+      c.addEventListener("click", flip);
       c.addEventListener("keydown", function (e) {
-        if (e.key === " " || e.key === "Enter") { e.preventDefault(); cycle(); }
+        if (e.key === " " || e.key === "Enter") { e.preventDefault(); flip(); }
       });
     }
     paintFont();

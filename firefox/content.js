@@ -1118,10 +1118,58 @@
   // here. Everything Notte injects carries data-notte so our own observers skip it.
   var ADJUST_ID = "__notte_adjust__";
   var OVERLAY_ID = "__notte_overlay__";
+  var FONT_ID = "__notte_font__";
+  var NOTTE_RT = typeof browser !== "undefined" ? browser : chrome;
+  // Bundled OpenDyslexic (SIL OFL). Built by FETCHING the bundled woff2 and
+  // inlining it as a data: URI. Referencing the extension URL directly in
+  // src:url() works on Chrome/Firefox but Safari blocks it as a cross-origin
+  // font load (silent fall back to Comic Sans); a data: URI is same-origin
+  // everywhere. Fetched once, then cached. Only injected when the option is on.
+  var _dysCss = null;
+  function _b64(buf) {
+    var by = new Uint8Array(buf), out = "", C = 0x8000;
+    for (var i = 0; i < by.length; i += C) out += String.fromCharCode.apply(null, by.subarray(i, i + C));
+    return btoa(out);
+  }
+  function _dyslexicCss() {
+    if (_dysCss) return _dysCss;
+    var one = function (file, w) {
+      return fetch(NOTTE_RT.runtime.getURL("fonts/" + file))
+        .then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.arrayBuffer(); })
+        .then(function (buf) {
+          return "@font-face{font-family:'OpenDyslexic';font-style:normal;font-weight:" + w +
+                 ";font-display:swap;src:url('data:font/woff2;base64," + _b64(buf) + "') format('woff2');}";
+        });
+    };
+    _dysCss = Promise.all([one("opendyslexic-regular.woff2", 400), one("opendyslexic-bold.woff2", 700)])
+      .then(function (parts) { return parts.join(""); })
+      .catch(function (e) {
+        _dysCss = null;
+        try { console.warn("[Notte] OpenDyslexic failed to load:", e); } catch (_) {}
+        return "";
+      });
+    return _dysCss;
+  }
+  function ensureDyslexicFont(active) {
+    try {
+      var existing = document.getElementById(FONT_ID);
+      if (!active) { if (existing && existing.parentNode) existing.parentNode.removeChild(existing); return; }
+      if (existing) return;
+      if (!NOTTE_RT || !NOTTE_RT.runtime || !NOTTE_RT.runtime.getURL) return;
+      _dyslexicCss().then(function (css) {
+        if (!css || document.getElementById(FONT_ID)) return;
+        var st = document.createElement("style");
+        st.id = FONT_ID;
+        st.setAttribute("data-notte", "");
+        st.textContent = css;
+        (document.head || document.documentElement).appendChild(st);
+      });
+    } catch (e) {}
+  }
   var TEXT_SEL = "body :where(p,li,a,span,td,th,h1,h2,h3,h4,h5,h6,label,button,input,select,textarea,blockquote,dd,dt,figcaption,em,strong,small,code,pre)";
   function fontStack(name) {
-    // OpenDyslexic needs its font file bundled + an @font-face to truly apply;
-    // until then it falls back to the most legible widely-installed faces.
+    // OpenDyslexic is bundled and injected via @font-face (see ensureDyslexicFont).
+    // The rest of the stack is a graceful fallback if the font file fails to load.
     if (name === "dyslexic") return "'OpenDyslexic','Comic Sans MS',Verdana,Tahoma,sans-serif";
     return "Verdana,Tahoma,Arial,sans-serif";
   }
@@ -1138,6 +1186,7 @@
     return css;
   }
   function ensureAdjust(theme) {
+    ensureDyslexicFont(theme.fontFamily === "dyslexic");
     var css = buildAdjustCSS(theme);
     var el = document.getElementById(ADJUST_ID);
     if (!css) {
@@ -2100,6 +2149,13 @@
     if (api2.storage && api2.storage.onChanged) {
       api2.storage.onChanged.addListener(function(ch, area) {
         if (area === "local") loadAndRender();
+      });
+    }
+    // Safari relays storage.onChanged to content scripts with ~1s latency, so the
+    // popup also pings us directly for an instant re-render on every change.
+    if (api2.runtime && api2.runtime.onMessage) {
+      api2.runtime.onMessage.addListener(function(msg) {
+        if (msg && msg.type === "notte-apply") loadAndRender();
       });
     }
   })();
