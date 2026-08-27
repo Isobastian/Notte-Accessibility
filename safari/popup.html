@@ -45,7 +45,9 @@
 
   /* ---- scrolling list ---- */
   .list{flex:1 1 auto;min-height:0;overflow-y:auto;overflow-x:hidden;position:relative;z-index:1;
-    padding:24px;display:flex;flex-direction:column;gap:24px;}
+    padding:24px;display:flex;flex-direction:column;gap:24px;
+    /* Firefox / non-WebKit scrollbar — match the purple WebKit thumb below */
+    scrollbar-width:thin;scrollbar-color:rgba(157,151,246,.35) transparent;}
   .list::-webkit-scrollbar{width:8px;}
   .list::-webkit-scrollbar-thumb{background:rgba(157,151,246,.35);border-radius:8px;}
   .list::-webkit-scrollbar-track{background:transparent;}

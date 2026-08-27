@@ -635,6 +635,9 @@
   var EMPTY = { has: function() {
     return false;
   } };
+  // Selectors of rules that apply a CSS mask; populated by handleRule() each
+  // build, consumed by fixMaskedIcons(). Module-scoped so both can see it.
+  var maskSelectors = /* @__PURE__ */ new Set();
   function roleFor(prop, masked) {
     switch (prop) {
       case "color":
@@ -921,6 +924,15 @@
     if (rule.selectorText !== void 0 && rule.style) {
       var text = transformStyleRule(rule, theme, ctx.colorVars);
       if (text) ctx.out.push(text);
+      // Elements with a CSS mask (icon fonts, Codex/OOUI icons, etc.) take their
+      // visible colour from background-color, which the colour pass darkens like
+      // any surface -- leaving the icon invisible on a dark page. Record the
+      // selector so fixMaskedIcons() can re-lighten those elements afterwards,
+      // using element (computed) context a per-rule pass lacks (mask and colour
+      // are frequently declared in separate rules).
+      if (theme.mode === "dark" && (rule.style.getPropertyValue("mask-image") || rule.style.getPropertyValue("-webkit-mask-image"))) {
+        try { maskSelectors.add(rule.selectorText); } catch (e) {}
+      }
       if (rule.cssRules && rule.cssRules.length) {
         var sub = { out: [], cors: ctx.cors, colorVars: ctx.colorVars };
         walkRules(rule.cssRules, theme, sub);
@@ -1830,6 +1842,7 @@
       }
       return { css: ctx.out.join("\n"), fetch: col.unreadable.concat(ctx.cors) };
     }
+    var maskDirty = false;
     function processRoot(root) {
       // The dark base sheet (color-scheme:dark, dark scrollbars) belongs to dark
       // mode only. On a bright page we never inject it, so the page stays light.
@@ -1844,6 +1857,9 @@
       // which sites do not do and the engine never relied on catching.
       var sig = buildSig(root);
       if (!cssDirty && themeSheet.__notteLastCss != null && lastBuildSig.get(root) === sig) return;
+      // First root to rebuild this pass resets the mask-selector set; later roots
+      // in the same pass add to it (union across document + shadow roots).
+      if (!maskDirty) { maskSelectors.clear(); maskDirty = true; }
       var r = buildOverride(root);
       // Setting textContent re-parses the whole (large) sheet, so only write when
       // the produced CSS actually differs from what is already applied.
@@ -1857,6 +1873,49 @@
         nlog("theme sheet ready (document): css bytes =", r.css.length, "| cross-origin sheets queued =", r.fetch.length);
       }
       if (root === document && r.fetch.length) fetchAndApply(r.fetch);
+    }
+    var MASK_ID = "__notte_mask__";
+    var maskCounter = 0;
+    function fixMaskedIcons(root) {
+      // See handleRule: a masked element's background-color is its ink. The
+      // colour pass darkens it into invisibility on a dark page. Re-lighten each
+      // one by remapping its (themed) background-color onto the foreground band,
+      // via a targeted override with an ID-level specificity bump so it beats the
+      // theme sheet's own rule for that element.
+      if (theme.mode !== "dark") { removeSheet(root, MASK_ID); return; }
+      // No selectors collected on this build (e.g. a rebuild that raced the CSSOM
+      // in Chrome) means "we didn't look", not "there are no icons". Writing an
+      // empty sheet here would wipe good overrides and flash the icons back to
+      // dark -- so leave the existing overrides in place instead.
+      if (!maskSelectors.size) return;
+      var sheet = ensureSheet(root, MASK_ID);
+      sheet.disabled = true; // measure the theme colour without our override in the way
+      var css = "";
+      var seen = new Set();
+      maskSelectors.forEach(function(sel) {
+        var list;
+        try { list = root.querySelectorAll(sel); } catch (e) { return; }
+        for (var i = 0; i < list.length; i++) {
+          var el = list[i];
+          if (seen.has(el)) continue;
+          seen.add(el);
+          try {
+            var cs = getComputedStyle(el);
+            var mi = cs.maskImage || cs.webkitMaskImage;
+            if (!mi || mi === "none") continue;      // not actually masked
+            var bg = cs.backgroundColor;
+            var c = parseColor(bg);
+            if (!c || c.a === 0) continue;           // transparent = no ink to show
+            var fg = transformValue(bg, "fg", theme);
+            if (!fg || fg === bg) continue;
+            var id = el.getAttribute("data-notte-mask");
+            if (!id) { id = String(++maskCounter); el.setAttribute("data-notte-mask", id); }
+            css += '[data-notte-mask="' + id + '"]:not(#_n){background-color:' + fg + " !important}\n";
+          } catch (e) {}
+        }
+      });
+      if (sheet.__notteLastCss !== css) { sheet.textContent = css; sheet.__notteLastCss = css; }
+      sheet.disabled = false;
     }
     function fetchAndApply(hrefs) {
       var fresh = [];
@@ -1888,6 +1947,7 @@
             var el = ensureSheet(document, CORS_ID);
             el.textContent += "\n" + ctx.out.join("\n");
           }
+          fixMaskedIcons(document);
           if (ctx.cors.length) fetchAndApply(ctx.cors);
         } finally {
           pendingFetches--;
@@ -1913,12 +1973,23 @@
         }
       }
       lastColorVars = resolveColorVars(varMap);
+      maskDirty = false; // set true by the first root that actually rebuilds below
       try {
         processRoot(document);
         for (var i = 0; i < shadowRoots.length; i++) {
           try {
             processRoot(shadowRoots[i]);
           } catch (e) {
+          }
+        }
+        // Only refresh the mask overrides when a rebuild actually happened this
+        // pass. A skipped (unchanged) pass leaves maskSelectors as last built; it
+        // must NOT run the pass with an empty set -- that would wipe the overrides
+        // and the icons would flash back to dark.
+        if (maskDirty) {
+          fixMaskedIcons(document);
+          for (var im = 0; im < shadowRoots.length; im++) {
+            try { fixMaskedIcons(shadowRoots[im]); } catch (e) {}
           }
         }
         inline.refresh();
@@ -1996,8 +2067,10 @@
         inline.stop();
         removeSheet(document, THEME_ID);
         removeSheet(document, CORS_ID);
+        removeSheet(document, MASK_ID);
         for (var j = 0; j < shadowRoots.length; j++) {
           try { removeSheet(shadowRoots[j], THEME_ID); } catch (e) {}
+          try { removeSheet(shadowRoots[j], MASK_ID); } catch (e) {}
         }
       }
       updateEnhancements(theme);
@@ -2025,10 +2098,12 @@
       removeBase(document);
       removeSheet(document, THEME_ID);
       removeSheet(document, CORS_ID);
+      removeSheet(document, MASK_ID);
       for (var i = 0; i < shadowRoots.length; i++) {
         removeAntiFlash(shadowRoots[i]);
         removeBase(shadowRoots[i]);
         removeSheet(shadowRoots[i], THEME_ID);
+        removeSheet(shadowRoots[i], MASK_ID);
       }
     }
     var autoDecision = null;
