@@ -84,6 +84,12 @@ xcrun safari-web-extension-converter /path/to/safari \
 Open in Xcode, set your signing **Team**, **Run**, then enable it in
 **Settings → Safari → Extensions**. Publish via App Store Connect.
 
+## Privacy
+
+Notte collects no data: no server, no accounts, no analytics, no tracking, no
+ads. Settings live in your browser's local storage on your own device. See
+[PRIVACY.md](PRIVACY.md).
+
 ## Contributing & community
 Everyone is welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) and our
 [ACCESSIBILITY.md](ACCESSIBILITY.md) statement. Please be kind:

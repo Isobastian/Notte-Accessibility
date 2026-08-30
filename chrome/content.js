@@ -1130,6 +1130,7 @@
   // here. Everything Notte injects carries data-notte so our own observers skip it.
   var ADJUST_ID = "__notte_adjust__";
   var OVERLAY_ID = "__notte_overlay__";
+  var WARM_ID = "__notte_warm__";
   var FONT_ID = "__notte_font__";
   var NOTTE_RT = typeof browser !== "undefined" ? browser : chrome;
   // Bundled OpenDyslexic (SIL OFL). Built by FETCHING the bundled woff2 and
@@ -1214,31 +1215,57 @@
     }
     if (el.textContent !== css) el.textContent = css;
   }
+  // TWO layers, never one (hard-won on Safari — keep them separate).
+  // Brightness/Saturation ride a backdrop-filter; Warm tint is a multiply.
+  // WebKit DROPS backdrop-filter entirely when the same element also carries
+  // mix-blend-mode, so the old single-div overlay silently lost desaturation
+  // and dimming on Safari whenever Warm tint was on — only the warm multiply
+  // survived, which read as "Saturation can't reach 0". Chrome and Firefox
+  // composite both on one element, so it looked fine there. Splitting them
+  // across two sibling divs is identical in Chrome/Firefox (measured: same
+  // chroma and luminance) and restores Safari.
+  // Paint order matters: the warm layer must sit ABOVE the filter layer. Put
+  // it below and the filter desaturates the tint itself, so Warm tint does
+  // nothing at all.
+  var OVERLAY_BOX = "position:fixed;top:0;left:0;right:0;bottom:0;pointer-events:none;";
   function overlayStyle(theme) {
     var filt = [];
     if (theme.saturation != null) filt.push("saturate(" + (theme.saturation / 100).toFixed(2) + ")");
     if (theme.brightness != null) filt.push("brightness(" + (theme.brightness / 100).toFixed(2) + ")");
     var f = filt.join(" ");
-    var css = "position:fixed;top:0;left:0;right:0;bottom:0;pointer-events:none;z-index:2147483646;";
-    if (f) css += "backdrop-filter:" + f + ";-webkit-backdrop-filter:" + f + ";";
-    if (theme.warmth) css += "background:rgba(255,167,71,.16);mix-blend-mode:multiply;";
-    return css;
+    if (!f) return null;
+    return OVERLAY_BOX + "z-index:2147483646;" +
+      "backdrop-filter:" + f + ";-webkit-backdrop-filter:" + f + ";";
   }
-  function ensureOverlay(theme) {
-    var need = theme.warmth || theme.brightness != null || theme.saturation != null;
-    var el = document.getElementById(OVERLAY_ID);
-    if (!need) {
+  function warmStyle(theme) {
+    if (!theme.warmth) return null;
+    return OVERLAY_BOX + "z-index:2147483647;" +
+      "background:rgba(255,167,71,.16);mix-blend-mode:multiply;";
+  }
+  function ensureLayer(id, css) {
+    var el = document.getElementById(id);
+    if (css == null) {
       if (el && el.parentNode) el.parentNode.removeChild(el);
-      return;
+      return null;
     }
     if (!el) {
       el = document.createElement("div");
-      el.id = OVERLAY_ID;
+      el.id = id;
       el.setAttribute("data-notte", "");
       el.setAttribute("aria-hidden", "true");
       (document.documentElement || document.body).appendChild(el);
     }
-    el.style.cssText = overlayStyle(theme);
+    el.style.cssText = css;
+    return el;
+  }
+  function ensureOverlay(theme) {
+    ensureLayer(OVERLAY_ID, overlayStyle(theme));
+    var warm = ensureLayer(WARM_ID, warmStyle(theme));
+    // Keep the warm layer last so it stays above the filter layer even when
+    // the filter layer is created after it (settings changed live).
+    if (warm && warm.parentNode && warm.parentNode.lastChild !== warm) {
+      warm.parentNode.appendChild(warm);
+    }
   }
   function updateEnhancements(theme) {
     try { ensureAdjust(theme); } catch (e) {}
@@ -1249,6 +1276,8 @@
     if (a && a.parentNode) a.parentNode.removeChild(a);
     var o = document.getElementById(OVERLAY_ID);
     if (o && o.parentNode) o.parentNode.removeChild(o);
+    var w = document.getElementById(WARM_ID);
+    if (w && w.parentNode) w.parentNode.removeChild(w);
   }
   function anyTool(t) {
     return !!(t.minContrast || t.warmth || t.underlineLinks || t.reduceMotion || t.focusOutline ||

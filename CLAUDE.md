@@ -156,6 +156,19 @@ shadow root and covers new roots during the loading window.
 `data-notte-inline` id and writes a targeted override *rule* in a dedicated sheet
 — we never rewrite the element's own `style`, so there's nothing to fight.
 
+**Overlay layering (hard-won — keep the two layers separate).** WebKit **drops
+`backdrop-filter` entirely when the same element also carries
+`mix-blend-mode`**. The page-global effects used to share one div, so on Safari,
+turning Warm tint on silently killed Brightness *and* Saturation — only the warm
+multiply painted, which looked like "Saturation can't reach 0" (colours muted a
+little, never grey). Chrome and Firefox composite both properties on one element,
+so it looked right there and the bug was Safari-only. Splitting into two sibling
+divs is pixel-identical in Chrome (measured: same chroma and luminance) and fixes
+Safari. **Paint order matters**: the warm layer must sit *above* the filter layer
+— put it below and the filter desaturates the tint itself, so Warm tint stops
+doing anything at all. Also note `backdrop-filter: url(#svgFilter)` is **not**
+supported in Safari, so an SVG `feColorMatrix` is not an alternative here.
+
 **Scrollbars / platform notes (hard-won — keep verbatim in `content.js`).**
 `color-scheme:dark` is set on every element (a descendant declaring
 `color-scheme:light` would otherwise win). Custom scrollbars are forced via both
@@ -207,9 +220,12 @@ applies **or any tool is on**, on any page:
 Tools split by how they're applied (see `src/engine/enhance.js`):
 - **Contrast** → `remap()` fg path (dark: brighten; light: darken). `lightContrast`
   gates the text pass so we never darken text on an already-dark page.
-- **Warm tint / Brightness / Saturation** → one fixed `#__notte_overlay__` div
-  using `backdrop-filter: saturate() brightness()` + a warm `multiply` layer.
-  Works in both modes; avoids `filter` on `<html>` (which breaks `position:fixed`).
+- **Warm tint / Brightness / Saturation** → **two** fixed sibling layers, never
+  one div: `#__notte_overlay__` (`backdrop-filter: saturate() brightness()`,
+  z-index 2147483646) and, above it, `#__notte_warm__` (warm `multiply`,
+  z-index 2147483647). Works in both modes; avoids `filter` on `<html>` (which
+  breaks `position:fixed`). **Do not merge them back into one element** — see the
+  WebKit note below.
 - **Links / Reduce motion / Strong focus / Dim images / Text size / Letter+word
   spacing / Paragraph (line) spacing / Font** → one injected `#__notte_adjust__`
   rule sheet (`buildAdjustCSS`).

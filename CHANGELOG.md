@@ -9,6 +9,17 @@ Firefox and Safari.
 
 ## [Unreleased]
 
+### Fixed
+- **Safari: Saturation and Brightness did nothing while Warm tint was on.**
+  The page-global effects shared a single overlay div that carried both
+  `backdrop-filter` and `mix-blend-mode: multiply`. WebKit drops
+  `backdrop-filter` entirely when the same element also blends, so on Safari only
+  the warm multiply survived — dragging Saturation to 0 muted the colours
+  slightly but never reached grey. Chrome and Firefox composite both properties
+  on one element, which is why it looked correct there. The overlay is now two
+  sibling layers — the filter below, the warm tint above — which measures
+  identical in Chrome (same chroma and luminance) and restores Safari.
+
 - Add your next changes here as you make them.
 
 ## [2.0.0] — 2026-08-27
