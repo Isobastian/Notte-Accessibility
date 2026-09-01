@@ -1489,6 +1489,29 @@
     var counter = 0;
     var observer = null;
     var flushScheduled = false;
+    // Nodes waiting for a full-subtree scan, and the timer that runs it with
+    // a small delay. Why: pages with frame-by-frame SVG animations
+    // (Lottie/Bodymovin and similar) add/remove nodes dozens of times per
+    // second. Calling scanAll() -- which runs
+    // querySelectorAll("[style],[fill],[stroke],[color],[bgcolor]") -- on
+    // every single frame saturates CPU/memory, and on iOS Safari this leads
+    // the OS to kill the tab for excessive resource use (the page "stalls
+    // and reloads"). Requests made in rapid succession here are coalesced
+    // and run at most every 150ms: new content is still themed in time,
+    // without redoing the work on every animation frame.
+    var pendingScanRoots = [];
+    var scanTimer = null;
+    function flushScans() {
+      scanTimer = null;
+      var roots = pendingScanRoots;
+      pendingScanRoots = [];
+      for (var r = 0; r < roots.length; r++) scanAll(roots[r]);
+    }
+    function scheduleScan(root) {
+      pendingScanRoots.push(root);
+      if (scanTimer) return;
+      scanTimer = setTimeout(flushScans, 150);
+    }
     function ensureSheet() {
       if (styleEl && styleEl.isConnected) return;
       var head = document.head || document.documentElement;
@@ -1577,7 +1600,7 @@
               if (n.nodeType !== 1) continue;
               try {
                 if (n.tagName === "BODY" || (n.hasAttribute && (n.hasAttribute("style") || n.hasAttribute("fill") || n.hasAttribute("stroke") || n.hasAttribute("color") || n.hasAttribute("bgcolor")))) process(n);
-                if (n.querySelectorAll) scanAll(n);
+                if (n.querySelectorAll) scheduleScan(n);
               } catch (e) {
               }
             }
@@ -1599,6 +1622,11 @@
         observer.disconnect();
         observer = null;
       }
+      if (scanTimer) {
+        clearTimeout(scanTimer);
+        scanTimer = null;
+      }
+      pendingScanRoots = [];
       rules = /* @__PURE__ */ Object.create(null);
       if (styleEl && styleEl.parentNode) styleEl.parentNode.removeChild(styleEl);
       styleEl = null;

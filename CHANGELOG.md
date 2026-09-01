@@ -10,6 +10,19 @@ Firefox and Safari.
 ## [Unreleased]
 
 ### Fixed
+- **iOS Safari: the tab was killed and reloaded on animation-heavy pages.**
+  With Notte active, pages built on Lottie/Bodymovin SVG animations, Elementor
+  and Slider Revolution (e.g. sebastian.works) stalled and reloaded themselves on
+  iPhone. The inline-style watcher ran a full-subtree rescan —
+  `querySelectorAll("[style],[fill],[stroke],[color],[bgcolor]")` — for every
+  batch of added nodes, and Lottie redraws its SVG nodes on every animation
+  frame, so the scan fired dozens of times per second. Barely visible on desktop;
+  on iOS, whose memory and CPU budgets are far tighter, it was enough for the OS
+  to kill the tab and for Safari to auto-reload it. Those full rescans are now
+  debounced: requested roots are queued and flushed at most once every 150ms.
+  Per-element attribute changes are unaffected, so new content is still themed —
+  batched instead of re-scanned on every frame.
+
 - **Safari: Saturation and Brightness did nothing while Warm tint was on.**
   The page-global effects shared a single overlay div that carried both
   `backdrop-filter` and `mix-blend-mode: multiply`. WebKit drops
