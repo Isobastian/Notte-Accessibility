@@ -20,6 +20,67 @@ Firefox and Safari.
   sibling layers — the filter below, the warm tint above — which measures
   identical in Chrome (same chroma and luminance) and restores Safari.
 
+- **Legacy pages kept pure black text after their backgrounds were darkened.**
+  Old HTML that colours the page with presentational attributes rather than CSS
+  — `<body text="#000000" link="..." vlink="...">` with `<font face size>` inside
+  `<table bgcolor>` — came out unreadable: we remapped `bgcolor` but not `text`,
+  so every cell stayed black on the new dark background. The `html{color:...}`
+  base rule could not save it, because `<body text>` *specifies* a colour on
+  `<body>` and a specified value always beats an inherited one. Measured on
+  www3.c-j.ch (embedded as an iframe in caritas-jeunesse.ch/liste-camps): all
+  225 text elements below 4.5:1, the table cells at 1.50:1. `text`, `link`,
+  `vlink` and `alink` are now remapped like any other foreground — the cells go
+  to 11.19:1. The rules are emitted through `:where()` so they keep the low
+  priority a presentational hint has in the real cascade: a rule the page
+  actually wrote still wins. Note that saturated *accent* text on a saturated
+  accent background (a blue `vlink` on a blue table header) is still remapped
+  against the reference background, not its real one, so it lands near 3:1 in
+  plain dark mode; the Contrast tool (AA/AAA) is what lifts it.
+
+- **Buttons and panels came out the same lightness, so controls disappeared into
+  the surface behind them.** The background remap used two disjoint curves with
+  almost no height: a saturated surface went to `28 + (100-L) x 0.05`, which
+  squeezes the entire 0-100 input range into L 28-33, and a neutral one to a
+  discontinuous tent spanning only L 11-17.7 (a white surface came out *darker*
+  than a mid-grey one). Any two surfaces therefore arrived at the same
+  lightness. The `S > 40` accent test made it worse by being a cliff: Bootstrap's
+  `btn-success` (`#5cb85c`, S 39.3%) fell one point under it and collapsed onto
+  the neutral curve. Measured on the Timbreuse page of
+  extranet.emploilausanne.ch: a `#337ab7` button on a `#f0f9ff` panel, 4.27:1 in
+  the original design and **1.04:1** after remapping; the green button **1.24:1**
+  against the page.
+
+  Both curves are replaced by one continuous ramp — white lands on `BG_L_FLOOR`
+  (9), already-dark surfaces stay near it, mid-tones rise to a peak that grows
+  with saturation (`BG_L_PEAK_NEUTRAL` 34 to `BG_L_PEAK_ACCENT` 46), so coloured
+  controls keep the presence they had while large neutral areas stay quiet. The
+  hard accent test becomes a blend across S 30-50 (`accentFactor`). Verified live
+  on that page: button vs panel **3.22:1**, green button vs page **3.54:1**
+  (better than the 2.48:1 of the original light design), and the panel's own
+  label 2.59:1 -> **5.32:1** as a side effect of the panel no longer being a
+  mid-tone blue. White button labels stay above 5:1.
+
+  Still open: two adjacent surfaces inside a dark palette cannot reach 3:1 by
+  fill alone in every case — dark UIs use a border for that. A ring on
+  interactive controls is the follow-up.
+
+- **Colour attributes written without a "#" were skipped entirely.** HTML parses
+  presentational colour attributes with its own "rules for parsing a legacy
+  colour value", which are far more permissive than CSS: `bgcolor="efd7c6"`,
+  `bgcolor="FC0"`, even `bgcolor="chucknorris"` all paint a colour. `parseColor()`
+  is a CSS parser and correctly rejected them, so `pushAttr` emitted nothing and
+  the element kept the light colour the page shipped — while the text on top of
+  it had been remapped light. On
+  www3.c-j.ch/pages/programme/detail.asp the camp navigation bar
+  (`<tr bgcolor="efd7c6">`) stayed `rgb(239,215,198)` with `#bbb392` links over
+  it: **1.52:1**. Attributes now fall back to `parseLegacyAttrColor()`, a mirror
+  of the HTML algorithm, so Notte always agrees with what the browser paints; CSS
+  values still go through `parseColor()` unchanged. That row now remaps to
+  `#4a2e1a` and its three links measure **5.88:1**. The new parser was checked
+  against Chrome's own output on 15 values, pathological ones included
+  (`"fc0"` -> rgb(15,12,0) but `"#fc0"` -> rgb(255,204,0); `"chucknorris"` ->
+  rgb(192,0,0)): 15 of 15 identical.
+
 - Add your next changes here as you make them.
 
 ## [2.0.0] — 2026-08-27

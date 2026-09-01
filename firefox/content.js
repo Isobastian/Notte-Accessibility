@@ -381,6 +381,21 @@
     if (s > 45) s = 45 + (s - 45) * 0.5;
     return s;
   }
+  // Background lightness ramp. One continuous tent: a white surface lands on
+  // BG_L_FLOOR, a surface that was already dark stays near it, and mid-tones
+  // rise to the peak. The peak grows with saturation, so coloured surfaces —
+  // buttons, badges, tinted panels — keep the presence they had in the
+  // original design, while large neutral areas stay quiet.
+  var BG_L_FLOOR = 9;
+  var BG_L_PEAK_NEUTRAL = 34;
+  var BG_L_PEAK_ACCENT = 46;
+  // How "accent" a colour is, 0 below S=30 and 1 above S=50. Replaces the hard
+  // origS > 40 test for backgrounds: that boundary was a cliff, and Bootstrap's
+  // btn-success (#5cb85c, S 39.3%) sat one point under it, which is why a green
+  // button collapsed to #1c321c — 1.24:1 against the page behind it.
+  function accentFactor(origS) {
+    return clamp((origS - 30) / 20, 0, 1);
+  }
   function remap(rgb, kind, theme) {
     var hsl = rgbToHsl(rgb.r, rgb.g, rgb.b);
     var a = rgb.a === void 0 ? 1 : rgb.a;
@@ -388,12 +403,20 @@
     var accent = origS > 40;
     var S = dampS(origS);
     if (kind === "bg") {
-      if (accent) {
-        S = Math.min(origS * 0.85, 85);
-        Lp = clamp(28 + (100 - L) * 0.05, 26, 40);
-      } else {
-        Lp = L >= 85 ? 11 + (100 - L) * 0.45 : 11 + L * 0.0794;
-      }
+      // The two curves this replaces had almost no height: every accent
+      // background was squeezed into L 28-33 and every neutral one into
+      // L 11-17.7 (and that neutral curve jumped at L 85, so a white surface
+      // came out DARKER than a mid-grey one). Two surfaces that were far apart
+      // therefore arrived at the same lightness — measured on
+      // extranet.emploilausanne.ch: a #337ab7 button on a #f0f9ff panel, 4.27:1
+      // in the original design, 1.04:1 after remapping. Separation is what the
+      // ramp below preserves.
+      var t = accentFactor(origS);
+      var damped = dampS(origS);
+      S = damped + (Math.min(origS * 0.85, 85) - damped) * t;
+      var peak = BG_L_PEAK_NEUTRAL + (BG_L_PEAK_ACCENT - BG_L_PEAK_NEUTRAL) * t;
+      var slope = (peak - BG_L_FLOOR) / 50;
+      Lp = L >= 50 ? BG_L_FLOOR + (100 - L) * slope : BG_L_FLOOR + L * slope;
     } else if (kind === "fg") {
       var light = !!(theme && theme.mode === "light");
       // On a bright page (dark mode OFF) we do NOT remap colours; the Contrast tool
@@ -818,6 +841,69 @@
     if (!lightOnly) pushAttr(el, "bgcolor", "background-color", "bg", theme, colorVars, out);
     return out;
   }
+  // Legacy presentational colour attributes on <body>: text / link / vlink /
+  // alink. Unlike bgcolor they are NOT reachable from a rule on <html>: a
+  // presentational hint *specifies* a colour on <body>, and a specified value
+  // always beats an inherited one, so our html{color:...} base rule never
+  // reaches the text. That is why 1998-era pages (<font face size> inside
+  // <table bgcolor>) kept pure black text after we darkened their backgrounds
+  // — e.g. www3.c-j.ch, black on #2c2c2c, 1.5:1.
+  //
+  // Each one is emitted through :where() so it keeps the low priority a
+  // presentational hint has in the real cascade: any rule the page actually
+  // wrote for the same element still wins, exactly as it would without Notte.
+  var BODY_COLOR_ATTRS = [
+    ["text", ""],
+    ["link", " a:link"],
+    ["vlink", " a:visited"],
+    ["alink", " a:active"]
+  ];
+  function transformBodyColorAttrs(el, theme, colorVars) {
+    var out = [];
+    if (!el || el.tagName !== "BODY" || !el.getAttribute) return out;
+    colorVars = colorVars || EMPTY;
+    // On a bright page remap() hands foregrounds back untouched unless the
+    // Contrast tool set a target, so there is nothing to emit.
+    if (theme && theme.mode === "light" && !theme.minContrast) return out;
+    for (var i = 0; i < BODY_COLOR_ATTRS.length; i++) {
+      var decls = [];
+      pushAttr(el, BODY_COLOR_ATTRS[i][0], "color", "fg", theme, colorVars, decls);
+      if (decls.length) out.push({ suffix: BODY_COLOR_ATTRS[i][1], decls: decls });
+    }
+    return out;
+  }
+  // Presentational colour ATTRIBUTES are not CSS values, and HTML parses them
+  // with its own far more permissive "rules for parsing a legacy colour value":
+  // bgcolor="efd7c6" (no "#"), bgcolor="FC0", even bgcolor="chucknorris" all
+  // paint a colour. parseColor() is a CSS parser and rightly rejects them, so we
+  // used to leave those elements alone — the browser painted the original light
+  // colour and Notte's remapped text landed on top of it. Measured on
+  // www3.c-j.ch/pages/programme/detail.asp: <tr bgcolor="efd7c6"> stayed
+  // rgb(239,215,198) with our #bbb392 links over it, 1.52:1.
+  //
+  // This mirrors the HTML algorithm so we always agree with what is painted.
+  // CSS values keep going through parseColor() unchanged — only attributes use
+  // this fallback.
+  function parseLegacyAttrColor(v) {
+    if (!v) return null;
+    var s = String(v).replace(/^[\s\u0000]+|[\s\u0000]+$/g, "");
+    if (!s) return null;
+    if (s.toLowerCase() === "transparent") return null;
+    var direct = parseColor(s);              // named colours, #hex, rgb(), hsl()...
+    if (direct) return direct;
+    if (s.length > 128) s = s.slice(0, 128);
+    if (s.charAt(0) === "#") s = s.slice(1);
+    s = s.replace(/[^0-9a-fA-F]/g, "0");
+    while (s.length === 0 || s.length % 3 !== 0) s += "0";
+    var n = s.length / 3;
+    var r = s.slice(0, n), g = s.slice(n, n * 2), b = s.slice(n * 2);
+    if (n > 8) { r = r.slice(n - 8); g = g.slice(n - 8); b = b.slice(n - 8); n = 8; }
+    while (n > 2 && r.charAt(0) === "0" && g.charAt(0) === "0" && b.charAt(0) === "0") {
+      r = r.slice(1); g = g.slice(1); b = b.slice(1); n--;
+    }
+    if (n > 2) { r = r.slice(0, 2); g = g.slice(0, 2); b = b.slice(0, 2); }
+    return { r: parseInt(r, 16), g: parseInt(g, 16), b: parseInt(b, 16), a: 1 };
+  }
   function pushAttr(el, attr, prop, role, theme, colorVars, out) {
     var v = el.getAttribute(attr);
     if (!v) return;
@@ -826,7 +912,7 @@
       var rw = rewriteVars(v, role, colorVars);
       if (rw !== v) out.push(prop + ":" + rw + " !important");
     } else {
-      var c = parseColor(v);
+      var c = parseLegacyAttrColor(v);
       if (c) out.push(prop + ":" + remap(c, role, theme) + " !important");
     }
   }
@@ -1435,8 +1521,11 @@
       if (svg.length) decls = decls.concat(svg);
       var attrs = transformHtmlColorAttrs(el, getTheme(), getColorVars());
       if (attrs.length) decls = decls.concat(attrs);
+      // <body text|link|vlink|alink> needs its own selectors (the link ones
+      // target descendants), so it cannot ride along in decls.
+      var bodyAttrs = transformBodyColorAttrs(el, getTheme(), getColorVars());
       var id = el.getAttribute(ATTR);
-      if (!decls.length) {
+      if (!decls.length && !bodyAttrs.length) {
         if (id) {
           delete rules[id];
           el.removeAttribute(ATTR);
@@ -1448,7 +1537,12 @@
         id = String(++counter);
         el.setAttribute(ATTR, id);
       }
-      rules[id] = "[" + ATTR + '="' + id + '"]{' + decls.join(";") + "}";
+      var sel = "[" + ATTR + '="' + id + '"]';
+      var css = decls.length ? sel + "{" + decls.join(";") + "}" : "";
+      for (var b = 0; b < bodyAttrs.length; b++) {
+        css += ":where(" + sel + bodyAttrs[b].suffix + "){" + bodyAttrs[b].decls.join(";") + "}";
+      }
+      rules[id] = css;
       scheduleFlush();
     }
     function scanAll(root) {
@@ -1459,6 +1553,11 @@
         return;
       }
       for (var i = 0; i < list.length; i++) process(list[i]);
+      // text/link/vlink/alink match none of the selectors above, and <body> is
+      // never inside an added subtree, so visit it explicitly on a full scan.
+      if (!root || root === document) {
+        if (document.body) process(document.body);
+      }
     }
     function start() {
       if (observer) return;
@@ -1477,7 +1576,7 @@
               var n = m.addedNodes[j];
               if (n.nodeType !== 1) continue;
               try {
-                if (n.hasAttribute && (n.hasAttribute("style") || n.hasAttribute("fill") || n.hasAttribute("stroke") || n.hasAttribute("color") || n.hasAttribute("bgcolor"))) process(n);
+                if (n.tagName === "BODY" || (n.hasAttribute && (n.hasAttribute("style") || n.hasAttribute("fill") || n.hasAttribute("stroke") || n.hasAttribute("color") || n.hasAttribute("bgcolor")))) process(n);
                 if (n.querySelectorAll) scanAll(n);
               } catch (e) {
               }
