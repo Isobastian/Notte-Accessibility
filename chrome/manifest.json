@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Notte — Accessibility & Dark Mode",
   "version": "2.0.1",
-  "description": "Darkens overly bright websites while keeping contrast high. Free, built for people with low vision.",
+  "description": "High-contrast dark mode & accessibility for low vision — make any bright site comfortable to read. Free, no ads, no tracking.",
   "icons": {
     "48": "images/icon-48.png",
     "64": "images/icon-64.png",

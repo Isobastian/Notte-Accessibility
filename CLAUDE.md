@@ -340,11 +340,19 @@ Check which engine is running: in the page console,
 
 ## TODO — next session
 
-1. **Tune the slider→effect maps.** The 0..100 → effect mappings live in
+1. **Fix the Firefox manifest description (ship in 2.0.2).** `firefox/manifest.json`
+   still carries the pre-rebrand **Italian** `description` ("Scurisce i siti troppo
+   chiari…"), which is what Firefox users see in `about:addons` while the AMO
+   listing is en-GB. `chrome/` and `safari/` were corrected on 9 Sep 2026 to the
+   `store-listings.md` text; firefox/ was deliberately left alone because 2.0.1 was
+   already in AMO review and the reviewer note states the package matches the repo.
+   Change it once that review clears. Note `sync.sh` never copies manifests — edit
+   each one by hand, and keep the three `version` values equal.
+2. **Tune the slider→effect maps.** The 0..100 → effect mappings live in
    `loadAndRender` (`content.js`): text scale `1 + pct/100*0.8`, letter `pct/100*0.2em`,
    line-height `1.5 + pct/100*0.7`, brightness/saturation/dimimg = `pct/100`. Try them
    on real sites and adjust ranges to taste.
-2. **Standalone modules.** Build Magnifier (§3a), Reading ruler, Large cursor,
+3. **Standalone modules.** Build Magnifier (§3a), Reading ruler, Large cursor,
    Read-aloud, and the Profile plumbing (Remember / Preset / Shortcuts) — still SOON.
 
 *Housekeeping:* the debug timing logs (`nlog`) are **off** — `var NBG = false` in
