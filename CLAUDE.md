@@ -187,6 +187,37 @@ one that works, and border/box-shadow/outline must be zeroed too or a white edge
 remains. Every per-element step is wrapped in try/catch so one odd value can't
 stop the pass.
 
+**Text selection (hard-won — keep both rules in `baseCSS()`).** Notte used to
+leave `::selection` alone, so the browser's own selection colours applied — built
+for a light page. The **unfocused** pair is the real problem: every engine
+repaints the selection with an "inactive" colour the moment the window goes to
+the background, and Chromium's is a mid grey `#6a6a6a` with near-black text
+(~1.9:1), so the selection vanished exactly when you switched window to use it.
+The base sheet now declares `#a09bdd` behind `#141414` text — 7.4:1 against the
+text *and* 7.4:1 against the `#141414` page, so the highlight itself is
+unmistakable. `text-shadow:none` stops a site glow smearing the selected glyphs,
+and `-webkit-text-fill-color` is set alongside `color` because a
+`background-clip:text` gradient heading has a transparent fill that swallows
+`color` alone. Every engine Notte ships on honours an author `::selection` in **both** the
+focused and the unfocused state, so one rule covers both; the second rule,
+`::selection:window-inactive`, is Safari insurance — WebKit's own pseudo-class,
+parsed by Chromium, dropped by Firefox as unknown.
+**Verified in both engines, in both states:** Chromium headless (pixel-compared,
+focused vs unfocused) and Firefox 155 on Windows, with the probe kept at
+`Claude outputs/notte-selection-firefox-test.html` — re-run it if a future
+browser regresses. The two engines failed *differently*, which is why both
+declarations are load-bearing: Chromium forces its own near-black foreground
+onto a grey background, while Gecko keeps its light grey behind the **page's**
+text colour (`#e8e6e3` on a Notte page — light on light, invisible), so only
+`color` rescues Firefox and only `background-color` rescues Chromium.
+Do **not** trust [bugzilla 706209](https://bugzilla.mozilla.org/show_bug.cgi?id=706209)
+("no way to style the selection in inactive windows"): it is still open, but
+Gecko has moved on and modern Firefox applies both halves. Firefox parses
+neither `::selection:window-inactive` nor `::inactive-selection` (verified),
+which is exactly why the two selectors live in **separate rules** — an unknown
+selector invalidates the whole rule it sits in, so merging them would take the
+working one down with it in Gecko.
+
 ### Settings model (`storage.local`)
 
 ```js

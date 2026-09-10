@@ -1181,9 +1181,46 @@
 
   // src/engine/base.js
   var BASE_ID = "__notte_base__";
+  // Text selection (hard-won — keep both rules).
+  // Notte used to leave ::selection alone, so the browser's own selection
+  // colours applied. Those are built for a LIGHT page, and the *unfocused*
+  // pair is worse still: as soon as the window loses focus every engine
+  // repaints the selection with its "inactive" colours, and on a dark page
+  // the selected text vanishes exactly when you switch window to use it.
+  // The two engines fail differently, which is why BOTH declarations matter:
+  //   Chromium — mid grey #6a6a6a with near-black text (~1.9:1). Forces its
+  //     own foreground, so a background-only rule would not have saved it.
+  //   Gecko    — its own light grey behind the PAGE's text colour, which on a
+  //     Notte page is #e8e6e3: light on light, the "white on white" report.
+  //     Only `color` fixes that one.
+  // Declaring our own pair fixes every engine we ship on: an author
+  // ::selection is honoured in BOTH the focused and the unfocused state.
+  // Measured — Chromium headless (pixel-compared) and Firefox 155 on Windows
+  // with the probe in "Claude outputs/notte-selection-firefox-test.html";
+  // re-run it if a future Firefox regresses. Do NOT trust bugzilla 706209
+  // ("no way to style the selection in inactive windows"): it is still open,
+  // but Gecko's behaviour has moved on and modern Firefox applies both the
+  // background and the colour. Firefox parses neither
+  // ::selection:window-inactive nor ::inactive-selection (verified), which is
+  // exactly why the two live in SEPARATE rules — an unknown selector kills
+  // the whole rule it sits in, so merging them would take the working one
+  // down with it in Gecko. The second rule is Safari insurance:
+  // :window-inactive is WebKit's own pseudo-class and Chromium parses it too.
+  // #a09bdd on #141414 is 7.4:1 both ways: AAA against the selected text AND
+  // against the page, so the highlight itself is unmistakable. text-shadow is
+  // killed because a site shadow smears the selected glyphs, and
+  // -webkit-text-fill-color is set because sites using background-clip:text
+  // (gradient headings) have a transparent fill that would swallow `color`.
+  var SELECT_BG = "#a09bdd";
+  var SELECT_FG = "#141414";
+  function selectionCSS(SEL) {
+    var d = "{background-color:" + SELECT_BG + " !important;color:" + SELECT_FG +
+            " !important;-webkit-text-fill-color:" + SELECT_FG + " !important;text-shadow:none !important;}";
+    return "*" + SEL + "::selection" + d + "*" + SEL + "::selection:window-inactive" + d;
+  }
   function baseCSS() {
     var SEL = ":not(#__notte_never__)";
-    return "html{color-scheme:dark !important;}*" + SEL + "{color-scheme:dark !important;}html,body{background-color:#141414 !important;}input,textarea,select{color-scheme:dark;}*" + SEL + "{scrollbar-color:#5a5a5a #1a1a1a !important;}*" + SEL + "::-webkit-scrollbar,*" + SEL + "::-webkit-scrollbar-corner{background:#1a1a1a !important;border:0 !important;box-shadow:none !important;outline:none !important;}*" + SEL + "::-webkit-scrollbar-track,*" + SEL + "::-webkit-scrollbar-track-piece,*" + SEL + "::-webkit-scrollbar-button{background:#1a1a1a !important;border:0 !important;box-shadow:none !important;outline:none !important;}*" + SEL + "::-webkit-scrollbar-thumb{background:#5a5a5a !important;border-radius:8px;border:0 !important;box-shadow:none !important;outline:none !important;}";
+    return "html{color-scheme:dark !important;}*" + SEL + "{color-scheme:dark !important;}html,body{background-color:#141414 !important;}input,textarea,select{color-scheme:dark;}*" + SEL + "{scrollbar-color:#5a5a5a #1a1a1a !important;}*" + SEL + "::-webkit-scrollbar,*" + SEL + "::-webkit-scrollbar-corner{background:#1a1a1a !important;border:0 !important;box-shadow:none !important;outline:none !important;}*" + SEL + "::-webkit-scrollbar-track,*" + SEL + "::-webkit-scrollbar-track-piece,*" + SEL + "::-webkit-scrollbar-button{background:#1a1a1a !important;border:0 !important;box-shadow:none !important;outline:none !important;}*" + SEL + "::-webkit-scrollbar-thumb{background:#5a5a5a !important;border-radius:8px;border:0 !important;box-shadow:none !important;outline:none !important;}" + selectionCSS(SEL);
   }
   function containerOf(root) {
     return root.head || (root.nodeType === 9 ? root.documentElement : root);

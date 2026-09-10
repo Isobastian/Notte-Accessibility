@@ -9,6 +9,26 @@ Firefox and Safari.
 
 ## [Unreleased]
 
+### Fixed
+- **Selected text disappeared when the browser window lost focus.** Notte never
+  declared its own `::selection`, so the browser's built-in selection colours
+  applied — and those are designed for a light page. The unfocused pair is worse
+  than the focused one: every engine repaints the selection with an "inactive"
+  colour as soon as the window goes to the background, and Chromium's is a mid
+  grey (`#6a6a6a`) with near-black text, about 1.9:1. On a dark page the
+  selection you had just made became unreadable the moment you switched window —
+  exactly the situation where you switch window *because* you want to keep that
+  selection in view. Notte now declares its own pair in the base sheet:
+  `#a09bdd` behind `#141414` text, 7.4:1 against the text and 7.4:1 against the
+  page, so the highlight is legible and unmistakable in both states, on every
+  browser Notte ships on. `text-shadow` is cleared and `-webkit-text-fill-color`
+  is set alongside `color`, so sites with glowing text or `background-clip:text`
+  gradient headings show their selected glyphs too.
+  The two engines failed differently, which is why both declarations are needed:
+  Chromium forced its own near-black foreground onto a grey background, while
+  Firefox kept its light grey behind the *page's* text colour — light on light,
+  and invisible.
+
 ## [2.0.1] — 2026-09-09
 
 ### Fixed
