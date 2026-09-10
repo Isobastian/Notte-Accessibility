@@ -57,13 +57,16 @@ chrome/     CANONICAL source + master icons. EDIT HERE, then run sync.sh.
               manifest.json     Chrome manifest
               images/           master extension icons (48…512) — synced to the others
               fonts/            bundled OpenDyslexic woff2 + OFL.txt — synced to the others
+              _locales/         UI strings: en (British, default) · en_US · it · fr · de · es
 firefox/    Same shared files + Firefox manifest (adds browser_specific_settings.gecko
               id + gecko_android for Firefox-Android; background uses "scripts").
 safari/     Same shared files + Safari manifest, wrapped with Xcode for iOS + macOS.
               app-icons/        the macOS/iOS APP icons (Safari-only; set in Xcode).
 tools/sync.sh   Copies the shared files (content.js, shadow-patch.js, background.js,
-                popup.html, popup.js, images/, fonts/) from chrome/ into firefox/
-                and safari/.
+                popup.html, popup.js, images/, fonts/, _locales/) from chrome/ into
+                firefox/ and safari/. It ADDS and OVERWRITES but never deletes: a
+                locale removed from chrome/_locales must be deleted by hand in the
+                other two.
 docs/           engine-v2-design.md (the engine design), store-listings.md.
 README.md · LICENSE · CHANGELOG.md · CONTRIBUTING.md · CODE_OF_CONDUCT.md ·
 SECURITY.md · ACCESSIBILITY.md · PRIVACY.md
@@ -238,6 +241,62 @@ Tools split by how they're applied (all of it in `chrome/content.js` — there i
 
 Everything Notte injects carries `data-notte` so our own observers skip it.
 
+## Localisation (popup UI)
+
+Six locales live in `chrome/_locales/`, mirrored by `sync.sh`:
+
+```
+en/      British English — the default_locale, ~57 messages
+en_US/   American English — 2 messages only
+it/  fr/  de/  es/
+```
+
+**`en_US` holds two strings, not fifty.** Chrome falls back to the default locale
+*per message*, so the American file contains only what actually differs — `links`
+("Emphasize links") and `saturation_desc` ("colors… gray"). Nothing else in the UI
+is spelled differently, so the file cannot drift. A browser set to `en-GB`, `en-AU`,
+`en-NZ`, `en-IE` or `en-ZA` finds no exact match, falls back to `en`, and gets
+British. Only `en-US` takes the override.
+
+**Strings are read by hand, not via `api.i18n.getMessage()`.** `popup.js` fetches
+`_locales/<locale>/messages.json` itself and looks up through `t(key, fallback)`.
+Two reasons, both deliberate — do not "simplify" this back to `getMessage()`:
+
+1. `getMessage()` is locked to the browser UI locale with no runtime override. Going
+   through `t()` means adding a language picker later is one variable, not a rewrite.
+2. It allows the accept-languages fallback: when the browser UI is in a language we
+   do not ship, the user's *preferred* languages are tried before English. This is
+   the managed-Chromebook case — ChromeOS is ~45% of Chrome installs and those
+   machines are usually `en-US` whoever is reading.
+
+Every lookup passes an English fallback (`t(it.id, it.name)`), so a failed fetch
+degrades to the English baked into `ITEMS` and `popup.html`, never to blank labels.
+
+**No language picker, by design.** Notte follows the browser, like every other
+extension. If one is ever wanted it belongs on an options page, not in the popup.
+
+**Testing a language:** open the popup as an ordinary page with a `?lang=` parameter —
+`chrome-extension://<id>/popup.html?lang=de` — and edit the address bar to switch.
+No restart, no second profile. Users never hit this: the browser opens the popup with
+no query string. Note the tab is wider than the real popup, so confirm tight layouts
+by clicking the toolbar button.
+
+**Adding a string:** add the key to all six `messages.json`, use `t("key", "English")`
+in `popup.js` or `data-i18n="key"` in `popup.html`, then run `sync.sh`.
+
+### Tools that are not built yet
+
+The six unfinished tools (read aloud, reading ruler, magnifier, large cursor, preset,
+shortcuts) show their **name inside a chip with a clock icon** (`.soonchip`, Figma
+139:66), and their control is dimmed (`.item.pending`). There is deliberately **no
+badge word on screen**: a separate "SOON" pill sat beside `.name`, which is
+`white-space:nowrap` and cannot shrink, so it capped how long any translated tool name
+could be — Italian *Righello di lettura* + *IN ARRIVO* overflowed the 360px popup.
+The wording survives as a screen-reader-only label (`pill_soon`, sentence case because
+some screen readers spell out capitals), so a blind user still hears that the tool is
+not ready, in their language. The chip reuses the old `.pill` background, border and
+radius, and `#a09bdd` was already the pill's text colour — no new tokens.
+
 ## Build / quick test
 
 There is no build — just load the folders.
@@ -261,7 +320,8 @@ Check which engine is running: in the page console,
 - **Firefox:** `"background": { "scripts": ["background.js"] }` (Firefox MV3),
   plus `browser_specific_settings.gecko` (`id`, `strict_min_version: "128.0"`,
   `data_collection_permissions: { required: ["none"] }`) and `gecko_android`.
-- All three: `manifest_version: 3`, `permissions: ["storage","activeTab"]`,
+- All three: `manifest_version: 3`, `default_locale: "en"`,
+  `permissions: ["storage","activeTab"]`,
   `host_permissions: ["<all_urls>"]`, and the two content scripts
   (`shadow-patch.js` in `world:"MAIN"`, then `content.js`) at `document_start`,
   `all_frames:true`.
@@ -270,6 +330,10 @@ Check which engine is running: in the page console,
 
 - JSON-validate all 3 manifests:
   `python3 -c "import json;json.load(open('chrome/manifest.json'))"` (and firefox/safari).
+- JSON-validate the locale files too — a malformed `messages.json` makes the whole
+  extension fail to load, not just that language.
+- If you touched popup strings: check the popup in a long language (German) at
+  maximum Text size. See *Localisation* below for how to open one.
 - `node --check` on `content.js`, `background.js`, `shadow-patch.js`, `popup.js`.
 - Test on at least one light site and one site with its own dark mode.
 - If you touched the shared files: run `bash tools/sync.sh`.

@@ -1,0 +1,173 @@
+{
+  "dark": {
+    "message": "Dark mode"
+  },
+  "warmth": {
+    "message": "Warm tint"
+  },
+  "links": {
+    "message": "Emphasise links"
+  },
+  "motion": {
+    "message": "Reduce motion"
+  },
+  "focus": {
+    "message": "Strong focus"
+  },
+  "contrast": {
+    "message": "Contrast"
+  },
+  "brightness": {
+    "message": "Brightness"
+  },
+  "saturation": {
+    "message": "Saturation"
+  },
+  "dimimg": {
+    "message": "Dim images"
+  },
+  "font": {
+    "message": "Dyslexia font"
+  },
+  "readaloud": {
+    "message": "Read aloud"
+  },
+  "ruler": {
+    "message": "Reading ruler"
+  },
+  "magnifier": {
+    "message": "Magnifier"
+  },
+  "cursor": {
+    "message": "Large cursor"
+  },
+  "textsize": {
+    "message": "Text size"
+  },
+  "letter": {
+    "message": "Letter spacing"
+  },
+  "paragraph": {
+    "message": "Line spacing"
+  },
+  "preset": {
+    "message": "Preset"
+  },
+  "shortcuts": {
+    "message": "Shortcuts"
+  },
+  "dark_desc": {
+    "message": "Darken this site"
+  },
+  "warmth_desc": {
+    "message": "Cut blue light"
+  },
+  "links_desc": {
+    "message": "Underline every link"
+  },
+  "motion_desc": {
+    "message": "Stop animations and autoplay"
+  },
+  "focus_desc": {
+    "message": "Make keyboard focus obvious"
+  },
+  "contrast_desc": {
+    "message": "Boost text contrast (AAA)"
+  },
+  "brightness_desc": {
+    "message": "Dim bright pages"
+  },
+  "saturation_desc": {
+    "message": "Mute colours, or go fully grey"
+  },
+  "dimimg_desc": {
+    "message": "Soften bright or busy images"
+  },
+  "font_desc": {
+    "message": "Clearer, dyslexia-friendly"
+  },
+  "readaloud_desc": {
+    "message": "Hear any page read aloud"
+  },
+  "ruler_desc": {
+    "message": "Highlight the line you're on"
+  },
+  "magnifier_desc": {
+    "message": "Cursor-following lens (hold Alt)"
+  },
+  "cursor_desc": {
+    "message": "Bigger, easier-to-see pointer"
+  },
+  "textsize_desc": {
+    "message": "Enlarge text on any site"
+  },
+  "letter_desc": {
+    "message": "Space out letters and words"
+  },
+  "paragraph_desc": {
+    "message": "Add space between lines"
+  },
+  "preset_desc": {
+    "message": "One-click readability"
+  },
+  "shortcuts_desc": {
+    "message": "Every toggle from the keyboard"
+  },
+  "ui_accessibility": {
+    "message": "Accessibility"
+  },
+  "tab_vision": {
+    "message": "Vision"
+  },
+  "tab_reading": {
+    "message": "Reading"
+  },
+  "ui_prefs_lead": {
+    "message": "Preferences on "
+  },
+  "ui_profiles": {
+    "message": "Profiles & shortcuts"
+  },
+  "ui_back": {
+    "message": "Back"
+  },
+  "ui_coming": {
+    "message": "More tools are coming — this is the full set. Each one turns on as it ships."
+  },
+  "ui_free": {
+    "message": "Free forever and open source."
+  },
+  "ui_credit_pre": {
+    "message": "Made with love by "
+  },
+  "ui_credit_post": {
+    "message": ", for the low-vision community 💛"
+  },
+  "ui_this_page": {
+    "message": "this page"
+  },
+  "aria_tools": {
+    "message": "Accessibility tools"
+  },
+  "aria_enable": {
+    "message": "Enable Notte on this site"
+  },
+  "pill_soon": {
+    "message": "Coming soon"
+  },
+  "btn_apply": {
+    "message": "Apply"
+  },
+  "btn_set": {
+    "message": "Set"
+  },
+  "val_off": {
+    "message": "OFF"
+  },
+  "aria_contrast_aaa": {
+    "message": "Contrast: AAA"
+  },
+  "aria_contrast_off": {
+    "message": "Contrast: off"
+  }
+}

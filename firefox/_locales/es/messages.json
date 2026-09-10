@@ -1,0 +1,173 @@
+{
+  "dark": {
+    "message": "Modo oscuro"
+  },
+  "warmth": {
+    "message": "Tono cálido"
+  },
+  "links": {
+    "message": "Resaltar enlaces"
+  },
+  "motion": {
+    "message": "Reducir animaciones"
+  },
+  "focus": {
+    "message": "Foco marcado"
+  },
+  "contrast": {
+    "message": "Contraste"
+  },
+  "brightness": {
+    "message": "Brillo"
+  },
+  "saturation": {
+    "message": "Saturación"
+  },
+  "dimimg": {
+    "message": "Atenuar imágenes"
+  },
+  "font": {
+    "message": "Fuente dislexia"
+  },
+  "readaloud": {
+    "message": "Leer en voz alta"
+  },
+  "ruler": {
+    "message": "Regla de lectura"
+  },
+  "magnifier": {
+    "message": "Lupa"
+  },
+  "cursor": {
+    "message": "Cursor grande"
+  },
+  "textsize": {
+    "message": "Tamaño del texto"
+  },
+  "letter": {
+    "message": "Espaciado de letras"
+  },
+  "paragraph": {
+    "message": "Interlineado"
+  },
+  "preset": {
+    "message": "Preajuste"
+  },
+  "shortcuts": {
+    "message": "Atajos"
+  },
+  "dark_desc": {
+    "message": "Oscurecer este sitio"
+  },
+  "warmth_desc": {
+    "message": "Reducir la luz azul"
+  },
+  "links_desc": {
+    "message": "Subrayar cada enlace"
+  },
+  "motion_desc": {
+    "message": "Detener animaciones y reproducción automática"
+  },
+  "focus_desc": {
+    "message": "Hacer visible el foco del teclado"
+  },
+  "contrast_desc": {
+    "message": "Aumentar el contraste del texto (AAA)"
+  },
+  "brightness_desc": {
+    "message": "Atenuar las páginas claras"
+  },
+  "saturation_desc": {
+    "message": "Atenuar los colores, hasta el gris"
+  },
+  "dimimg_desc": {
+    "message": "Suavizar imágenes brillantes o recargadas"
+  },
+  "font_desc": {
+    "message": "Más legible, apta para la dislexia"
+  },
+  "readaloud_desc": {
+    "message": "Escuchar la página en voz alta"
+  },
+  "ruler_desc": {
+    "message": "Resaltar la línea actual"
+  },
+  "magnifier_desc": {
+    "message": "Lupa que sigue al cursor (mantén Alt)"
+  },
+  "cursor_desc": {
+    "message": "Puntero más grande y más visible"
+  },
+  "textsize_desc": {
+    "message": "Ampliar el texto en cualquier sitio"
+  },
+  "letter_desc": {
+    "message": "Separar letras y palabras"
+  },
+  "paragraph_desc": {
+    "message": "Aumentar el espacio entre líneas"
+  },
+  "preset_desc": {
+    "message": "Legibilidad con un clic"
+  },
+  "shortcuts_desc": {
+    "message": "Cada ajuste desde el teclado"
+  },
+  "ui_accessibility": {
+    "message": "Accesibilidad"
+  },
+  "tab_vision": {
+    "message": "Visión"
+  },
+  "tab_reading": {
+    "message": "Lectura"
+  },
+  "ui_prefs_lead": {
+    "message": "Preferencias en "
+  },
+  "ui_profiles": {
+    "message": "Perfiles y atajos"
+  },
+  "ui_back": {
+    "message": "Atrás"
+  },
+  "ui_coming": {
+    "message": "Llegarán más herramientas: esta es la lista completa. Cada una se activa cuando esté lista."
+  },
+  "ui_free": {
+    "message": "Gratis para siempre y de código abierto."
+  },
+  "ui_credit_pre": {
+    "message": "Hecho con amor por "
+  },
+  "ui_credit_post": {
+    "message": ", para la comunidad con baja visión 💛"
+  },
+  "ui_this_page": {
+    "message": "esta página"
+  },
+  "aria_tools": {
+    "message": "Herramientas de accesibilidad"
+  },
+  "aria_enable": {
+    "message": "Activar Notte en este sitio"
+  },
+  "pill_soon": {
+    "message": "Próximamente"
+  },
+  "btn_apply": {
+    "message": "Aplicar"
+  },
+  "btn_set": {
+    "message": "Definir"
+  },
+  "val_off": {
+    "message": "OFF"
+  },
+  "aria_contrast_aaa": {
+    "message": "Contraste: AAA"
+  },
+  "aria_contrast_off": {
+    "message": "Contraste: desactivado"
+  }
+}

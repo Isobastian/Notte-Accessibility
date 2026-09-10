@@ -67,6 +67,19 @@
   .labelline{display:flex;align-items:center;gap:6px;}
   .name{font-weight:600;font-size:18px;color:#fff;white-space:nowrap;}
   .desc{font-weight:400;font-size:14px;color:#fff;opacity:.6;}
+    /* Tools that are not built yet: the name sits in a chip with a clock icon
+       instead of carrying a separate SOON badge. Reuses the .pill chrome, so no
+       new tokens are invented, and no badge word means nothing to overflow in
+       any language. */
+    .soonchip{display:inline-flex;align-items:center;gap:10px;min-width:0;
+      background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.1);
+      border-radius:24px;padding:1px 6px 4px;}
+    .soonchip .name{color:#a09bdd;}
+    .soonchip svg{flex:0 0 auto;display:block;margin-top:3px;}
+    .item.pending .sw,.item.pending .obtn{opacity:.5;}
+    /* Visible to screen readers only. */
+    .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;
+      overflow:hidden;clip:rect(0 0 0 0);clip-path:inset(50%);white-space:nowrap;border:0;}
   .pill{flex:0 0 auto;background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.1);
     border-radius:24px;padding:4px 8px;color:#a09bdd;font-weight:600;font-size:12px;letter-spacing:1.2px;}
 
@@ -137,26 +150,26 @@
             <svg class="logo" viewBox="0 6.5 32 32" width="32" height="32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M15.7871 6.5C14.5697 8.33785 13.867 10.5352 13.8818 12.8936C13.9221 19.2919 19.221 24.4459 25.7178 24.4053C28.0334 24.3907 30.1868 23.7147 32 22.5654C31.964 31.3719 24.8155 38.4998 16.001 38.5C7.16417 38.5 0.000175697 31.3361 0 22.499C0 13.733 7.04862 6.61431 15.7871 6.5Z" fill="url(#notte_moon)"/><defs><linearGradient id="notte_moon" x1="5.28936" y1="14.3696" x2="24.7708" y2="41.353" gradientUnits="userSpaceOnUse"><stop stop-color="#FFD000"/><stop offset="1" stop-color="#AF5400"/></linearGradient></defs></svg>
             <div class="titles">
               <h1>Notte</h1>
-              <div class="sub">Accessibility</div>
+              <div class="sub" data-i18n="ui_accessibility">Accessibility</div>
             </div>
           </div>
-          <button class="sw live on" id="masterToggle" role="switch" aria-checked="true" aria-label="Enable Notte on this site"><span class="knob"></span></button>
+          <button class="sw live on" id="masterToggle" role="switch" aria-checked="true" aria-label="Enable Notte on this site" data-i18n-aria="aria_enable"><span class="knob"></span></button>
         </div>
         <div class="chip">
           <span class="url" id="host">…</span>
         </div>
       </div>
 
-      <div class="tabs" role="tablist" aria-label="Accessibility tools">
-        <button class="tab" role="tab" id="tab-vision"  aria-selected="true">Vision</button>
-        <button class="tab" role="tab" id="tab-reading" aria-selected="false" tabindex="-1">Reading</button>
+      <div class="tabs" role="tablist" aria-label="Accessibility tools" data-i18n-aria="aria_tools">
+        <button class="tab" role="tab" id="tab-vision"  aria-selected="true" data-i18n="tab_vision">Vision</button>
+        <button class="tab" role="tab" id="tab-reading" aria-selected="false" tabindex="-1" data-i18n="tab_reading">Reading</button>
       </div>
     </div>
 
     <main class="list" id="panel" role="tabpanel" aria-labelledby="tab-vision"></main>
 
     <div class="foot">
-      <button class="link" id="openProfile"><span>Preferences on </span><span class="grad">Profiles &amp; shortcuts</span></button>
+      <button class="link" id="openProfile"><span data-i18n="ui_prefs_lead">Preferences on </span><span class="grad" data-i18n="ui_profiles">Profiles &amp; shortcuts</span></button>
     </div>
   </div>
 
@@ -165,14 +178,14 @@
     <div class="pf-top">
       <button class="back" id="backBtn">
         <svg class="arrow" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M15 4.5 7.5 12l7.5 7.5" stroke="#FFD000" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
-        Back to adjustments
+        <span data-i18n="ui_back">Back</span>
       </button>
     </div>
     <main class="pf-list" id="profilePanel"></main>
     <div class="pf-bottom">
       <div class="divider"></div>
-      <div class="pf-note">More tools are coming — this is the full set. Each one turns on as it ships.</div>
-      <div class="pf-credit">Free forever and open source.<br>Made with love by <b>Sebastian Nicosia</b>, for the low-vision community 💛</div>
+      <div class="pf-note" data-i18n="ui_coming">More tools are coming — this is the full set. Each one turns on as it ships.</div>
+      <div class="pf-credit"><span data-i18n="ui_free">Free forever and open source.</span><br><span data-i18n="ui_credit_pre">Made with love by </span><b>Sebastian Nicosia</b><span data-i18n="ui_credit_post">, for the low-vision community 💛</span></div>
     </div>
   </div>
 

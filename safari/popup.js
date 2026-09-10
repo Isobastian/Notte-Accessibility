@@ -19,6 +19,102 @@
 
   var api = (typeof browser !== "undefined") ? browser : chrome;
 
+  /* ---------- i18n ----------------------------------------------------------
+   * Strings live in _locales/<locale>/messages.json. We read them ourselves
+   * rather than calling api.i18n.getMessage(), for two reasons:
+   *   1. getMessage() is locked to the browser UI locale with no runtime
+   *      override, so a language picker later would mean rewriting every call.
+   *      Going through t() keeps that a one-variable change.
+   *   2. It lets us fall back to the user's accept-languages when the browser
+   *      UI is in a language we do not ship — the common case on a managed
+   *      Chromebook set to en-US whose owner reads another language.
+   * Every lookup falls back to the English baked into ITEMS/popup.html, so a
+   * failed fetch degrades to English rather than to empty labels.
+   * -------------------------------------------------------------------- */
+  // Clock icon for tools that are not built yet — exported from Figma (139:72).
+  var CLOCK_SVG = '<svg width="16" height="17" viewBox="0 0 16 17" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false"><path d="M15.8183 6.34097C15.6997 5.79367 15.486 5.18512 15.2893 4.65476C15.0482 4.29771 14.5895 4.06966 14.2155 4.23254C13.8415 4.39542 13.6747 4.75898 13.7594 5.14991C13.7764 5.2281 13.7764 5.2281 13.7933 5.30629C13.9731 5.75846 14.153 6.21064 14.2546 6.67976C14.9999 10.1199 12.795 13.5445 9.35485 14.2898C5.91467 15.0351 2.49015 12.8302 1.74483 9.39004C0.999499 5.94985 3.20438 2.52534 6.64457 1.78001C7.11369 1.67838 7.59974 1.65493 8.0858 1.63148C8.49367 1.62497 8.83378 1.30571 8.88852 0.802719C8.88201 0.394849 8.48457 0.0716758 8.05976 0C7.49552 0.0403887 6.85309 0.0977167 6.30579 0.216291C2.00555 1.14795 -0.750554 5.42859 0.181105 9.72882C1.11276 14.0291 5.3934 16.7852 9.69364 15.8535C13.9939 14.9218 16.75 10.6412 15.8183 6.34097Z" fill="#A09BDD"/><path d="M9.95085 1.55376C10.0017 1.78832 10.2089 1.989 10.3991 2.1115C11.1262 2.4451 11.7921 2.87383 12.3967 3.39768C12.716 3.73779 13.2021 3.71434 13.5422 3.39509C13.8823 3.07583 13.8419 2.51159 13.5396 2.24966C12.8229 1.58638 11.9668 1.03516 11.0663 0.657247C10.6076 0.429199 10.1555 0.609021 9.9274 1.06771C9.88309 1.24102 9.91697 1.39739 9.95085 1.55376Z" fill="#A09BDD"/><path d="M7.99922 3.51758C7.51922 3.51758 7.19922 3.83758 7.19922 4.31758V7.51758C7.19922 7.75758 7.27922 7.91758 7.43922 8.07758L9.83922 10.4776C9.99922 10.6376 10.2392 10.7176 10.3992 10.7176C10.5592 10.7176 10.7992 10.6376 10.9592 10.4776C11.2792 10.1576 11.2792 9.67758 10.9592 9.35758L8.79922 7.19758V4.31758C8.79922 3.83758 8.47922 3.51758 7.99922 3.51758Z" fill="#A09BDD"/></svg>';
+
+  var MSG = {};
+
+  function readLocale(loc) {
+    return fetch(api.runtime.getURL("_locales/" + loc + "/messages.json"))
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (j) {
+        if (!j) return null;
+        var out = {};
+        Object.keys(j).forEach(function (k) { out[k] = j[k].message; });
+        return out;
+      })
+      .catch(function () { return null; });
+  }
+
+  function candidates(tag) {
+    var t = String(tag || "").replace("-", "_");
+    var out = [];
+    if (t) out.push(t);
+    if (t.indexOf("_") > -1) out.push(t.split("_")[0]);
+    return out;
+  }
+
+  function loadMessages() {
+    var ui = "";
+    try { ui = api.i18n && api.i18n.getUILanguage ? api.i18n.getUILanguage() : navigator.language; } catch (_) {}
+
+    // Test hook. Opening popup.html?lang=de in a normal tab shows the popup in
+    // that language, so all six locales can be checked in one browser without
+    // restarting it or making a second profile. Users never see this: the
+    // browser opens the popup with no query string, so `forced` stays empty.
+    var forced = "";
+    try { forced = new URLSearchParams(location.search).get("lang") || ""; } catch (_) {}
+
+    return readLocale("en").then(function (base) {
+      MSG = base || {};
+      // When a language is forced we do NOT fall back to accept-languages —
+      // a test should show that language or plain English, nothing else.
+      return forced ? overlay(candidates(forced), true) : overlay(candidates(ui));
+    }).catch(function () { return null; });
+  }
+
+  function overlay(list, strict) {
+    if (!list.length) return strict ? null : acceptLangFallback();
+    var loc = list.shift();
+    if (loc === "en") return null;                 // base is already English
+    return readLocale(loc).then(function (found) {
+      if (!found) return overlay(list, strict);
+      Object.keys(found).forEach(function (k) { MSG[k] = found[k]; });
+      return true;
+    });
+  }
+
+  // Browser UI language had no locale of ours. The user's preferred languages
+  // often still do — a school Chromebook is en-US, its reader may not be.
+  function acceptLangFallback() {
+    if (!api.i18n || !api.i18n.getAcceptLanguages) return null;
+    return new Promise(function (resolve) {
+      try {
+        api.i18n.getAcceptLanguages(function (langs) {
+          var queue = [];
+          (langs || []).forEach(function (l) { candidates(l).forEach(function (c) { queue.push(c); }); });
+          resolve(overlay(queue));
+        });
+      } catch (_) { resolve(null); }
+    });
+  }
+
+  function t(key, fallback) {
+    var v = MSG[key];
+    return (v === undefined || v === null || v === "") ? (fallback !== undefined ? fallback : key) : v;
+  }
+
+  function applyStaticText() {
+    document.querySelectorAll("[data-i18n]").forEach(function (n) {
+      n.textContent = t(n.getAttribute("data-i18n"), n.textContent);
+    });
+    document.querySelectorAll("[data-i18n-aria]").forEach(function (n) {
+      n.setAttribute("aria-label", t(n.getAttribute("data-i18n-aria"), n.getAttribute("aria-label")));
+    });
+  }
+
   // Focus rings show only while navigating by keyboard: ONLY the navigation keys
   // turn it on, and any pointer interaction turns it off. (Safari otherwise
   // renders :focus-visible on click and on the popup's initial focus.)
@@ -40,9 +136,9 @@
   // key   : storage key. off: the slider value that means "tool off".
   var ITEMS = {
     vision: [
-      { id: "dark",       name: "Dark Mode",       desc: "Darken this site",                         type: "toggle", live: true },
+      { id: "dark",       name: "Dark mode",       desc: "Darken this site",                         type: "toggle", live: true },
       { id: "warmth",     name: "Warm tint",       desc: "Cut blue light",                            type: "toggle", live: true, key: "warmth" },
-      { id: "links",      name: "Emphasize links", desc: "Underline every link",                      type: "toggle", live: true, key: "links" },
+      { id: "links",      name: "Emphasise links", desc: "Underline every link",                      type: "toggle", live: true, key: "links" },
       { id: "motion",     name: "Reduce motion",   desc: "Stop animations and autoplay",             type: "toggle", live: true, key: "motion" },
       { id: "focus",      name: "Strong focus",    desc: "Make keyboard focus obvious",              type: "toggle", live: true, key: "focus" },
       { id: "contrast",   name: "Contrast",        desc: "Boost text contrast (AAA)",                type: "value",  live: true, val: "OFF", w: 95 },
@@ -52,7 +148,7 @@
       { id: "dimimg",     name: "Dim images",      desc: "Soften bright or busy images",             type: "slider", live: true, key: "dimimg", off: 100 }
     ],
     reading: [
-      { id: "font",       name: "Dyslexia Font",     desc: "Clearer, dyslexia-friendly",            type: "toggle", live: true },
+      { id: "font",       name: "Dyslexia font",     desc: "Clearer, dyslexia-friendly",            type: "toggle", live: true },
       { id: "readaloud",  name: "Read aloud",        desc: "Hear any page read aloud",              type: "toggle", pill: true },
       { id: "ruler",      name: "Reading ruler",     desc: "Highlight the line you're on",          type: "toggle", pill: true },
       { id: "magnifier",  name: "Magnifier",         desc: "Cursor-following lens (hold Alt)",      type: "toggle", pill: true },
@@ -60,7 +156,7 @@
       { divider: true },
       { id: "textsize",   name: "Text size",         desc: "Enlarge text on any site",              type: "slider", live: true, key: "textsize", off: 0 },
       { id: "letter",     name: "Letter spacing",    desc: "Space out letters and words",           type: "slider", live: true, key: "letter", off: 0 },
-      { id: "paragraph",  name: "Paragraph spacing", desc: "Add space between lines",               type: "slider", live: true, key: "paragraph", off: 0 }
+      { id: "paragraph",  name: "Line spacing",      desc: "Add space between lines",               type: "slider", live: true, key: "paragraph", off: 0 }
     ],
     profile: [
       { id: "preset",     name: "Preset",    desc: "One-click readability",          type: "obtn", btn: "Apply", pill: true },
@@ -131,7 +227,7 @@
     if (item.place !== "bottom") d.style.width = item.w + "px";
     var k = document.createElement("span");
     k.className = "knob";
-    k.textContent = item.val;
+    k.textContent = t("val_" + String(item.val).toLowerCase(), item.val);
     d.appendChild(k);
     return d;
   }
@@ -146,7 +242,7 @@
   function obtnEl(item) {
     var s = document.createElement("span");
     s.className = "obtn deact";
-    s.textContent = item.btn;
+    s.textContent = t("btn_" + String(item.btn).toLowerCase(), item.btn);
     return s;
   }
   function contrastSwitchEl() {
@@ -181,17 +277,34 @@
         return;
       }
       var row = document.createElement("div");
-      row.className = "item " + (isStacked(it) ? "stacked" : "inline");
+      row.className = "item " + (isStacked(it) ? "stacked" : "inline") + (it.pill ? " pending" : "");
 
       var lb = document.createElement("div"); lb.className = "labelblock";
       var ll = document.createElement("div"); ll.className = "labelline";
-      var nm = document.createElement("div"); nm.className = "name"; nm.textContent = it.name;
-      ll.appendChild(nm);
+      var nm = document.createElement("div"); nm.className = "name"; nm.textContent = t(it.id, it.name);
+
       if (it.pill) {
-        var p = document.createElement("span"); p.className = "pill"; p.textContent = "SOON";
-        ll.appendChild(p);
+        // Tools that are not built yet (Figma 139:66): the NAME itself sits in a
+        // chip with a clock icon, instead of a separate "SOON" badge beside it.
+        // There is no badge word on screen, so nothing here can overflow when
+        // translated — the old pill capped how long a tool name could be, and
+        // Italian "Righello di lettura" + "IN ARRIVO" broke the 360px popup.
+        // The wording survives as a screen-reader-only label, so a blind user
+        // still hears that the tool is not available yet, in their language.
+        var chip = document.createElement("span");
+        chip.className = "soonchip";
+        chip.innerHTML = CLOCK_SVG;          // static markup, no user input
+        chip.appendChild(nm);
+        var sr = document.createElement("span");
+        sr.className = "sr-only";
+        sr.textContent = t("pill_soon", "Coming soon");
+        chip.appendChild(sr);
+        ll.appendChild(chip);
+      } else {
+        ll.appendChild(nm);
       }
-      var ds = document.createElement("div"); ds.className = "desc"; ds.textContent = it.desc;
+
+      var ds = document.createElement("div"); ds.className = "desc"; ds.textContent = t(it.id + "_desc", it.desc);
       lb.appendChild(ll); lb.appendChild(ds);
       row.appendChild(lb);
 
@@ -314,7 +427,7 @@
     if (!c) return;
     var on = contrastState() !== "off";
     c.classList.toggle("on", on);   // shared .sw.on CSS slides + recolours the knob
-    c.setAttribute("aria-label", "Contrast: " + (on ? "AAA" : "off"));
+    c.setAttribute("aria-label", on ? t("aria_contrast_aaa", "Contrast: AAA") : t("aria_contrast_off", "Contrast: off"));
     c.setAttribute("aria-checked", String(on));
   }
   function setContrast(next) {
@@ -439,12 +552,15 @@
   document.getElementById("backBtn").addEventListener("click", hideProfile);
 
   /* ---------- start ---------- */
-  selectTab("vision");
-  Promise.all([getSettings(), getActiveHost()]).then(function (res) {
+  loadMessages().then(function () {
+    applyStaticText();
+    selectTab("vision");
+    return Promise.all([getSettings(), getActiveHost()]);
+  }).then(function (res) {
     settings = res[0] || DEFAULTS;
     KEYS.forEach(function (k) { if (!settings[k]) settings[k] = {}; });
     host = res[1] || "";
-    el.host.textContent = host || "this page";
+    el.host.textContent = host || t("ui_this_page", "this page");
     selectTab(currentTab);
   });
 })();

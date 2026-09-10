@@ -28,3 +28,7 @@ private/
 
 # Local working notes — not part of the public repo
 Claude outputs/
+
+# Store packages — build these OUTSIDE the repository
+*.zip
+*.xpi

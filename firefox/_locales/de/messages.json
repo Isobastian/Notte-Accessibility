@@ -1,0 +1,173 @@
+{
+  "dark": {
+    "message": "Dunkelmodus"
+  },
+  "warmth": {
+    "message": "Warmer Ton"
+  },
+  "links": {
+    "message": "Links hervorheben"
+  },
+  "motion": {
+    "message": "Animationen reduzieren"
+  },
+  "focus": {
+    "message": "Starker Fokus"
+  },
+  "contrast": {
+    "message": "Kontrast"
+  },
+  "brightness": {
+    "message": "Helligkeit"
+  },
+  "saturation": {
+    "message": "Sättigung"
+  },
+  "dimimg": {
+    "message": "Bilder abdunkeln"
+  },
+  "font": {
+    "message": "Legasthenie-Schrift"
+  },
+  "readaloud": {
+    "message": "Vorlesen"
+  },
+  "ruler": {
+    "message": "Leselineal"
+  },
+  "magnifier": {
+    "message": "Lupe"
+  },
+  "cursor": {
+    "message": "Großer Zeiger"
+  },
+  "textsize": {
+    "message": "Textgröße"
+  },
+  "letter": {
+    "message": "Zeichenabstand"
+  },
+  "paragraph": {
+    "message": "Zeilenabstand"
+  },
+  "preset": {
+    "message": "Voreinstellung"
+  },
+  "shortcuts": {
+    "message": "Kurzbefehle"
+  },
+  "dark_desc": {
+    "message": "Diese Seite abdunkeln"
+  },
+  "warmth_desc": {
+    "message": "Blaulicht reduzieren"
+  },
+  "links_desc": {
+    "message": "Jeden Link unterstreichen"
+  },
+  "motion_desc": {
+    "message": "Animationen und Autoplay stoppen"
+  },
+  "focus_desc": {
+    "message": "Tastaturfokus deutlich zeigen"
+  },
+  "contrast_desc": {
+    "message": "Textkontrast erhöhen (AAA)"
+  },
+  "brightness_desc": {
+    "message": "Helle Seiten abdunkeln"
+  },
+  "saturation_desc": {
+    "message": "Farben dämpfen, bis zu Graustufen"
+  },
+  "dimimg_desc": {
+    "message": "Helle oder unruhige Bilder dämpfen"
+  },
+  "font_desc": {
+    "message": "Klarer, für Legasthenie geeignet"
+  },
+  "readaloud_desc": {
+    "message": "Jede Seite vorlesen lassen"
+  },
+  "ruler_desc": {
+    "message": "Aktuelle Zeile hervorheben"
+  },
+  "magnifier_desc": {
+    "message": "Lupe folgt dem Zeiger (Alt halten)"
+  },
+  "cursor_desc": {
+    "message": "Größerer, besser sichtbarer Zeiger"
+  },
+  "textsize_desc": {
+    "message": "Text auf jeder Seite vergrößern"
+  },
+  "letter_desc": {
+    "message": "Zeichen und Wörter spreizen"
+  },
+  "paragraph_desc": {
+    "message": "Abstand zwischen den Zeilen erhöhen"
+  },
+  "preset_desc": {
+    "message": "Lesbarkeit mit einem Klick"
+  },
+  "shortcuts_desc": {
+    "message": "Jede Funktion per Tastatur"
+  },
+  "ui_accessibility": {
+    "message": "Barrierefreiheit"
+  },
+  "tab_vision": {
+    "message": "Sehen"
+  },
+  "tab_reading": {
+    "message": "Lesen"
+  },
+  "ui_prefs_lead": {
+    "message": "Einstellungen unter "
+  },
+  "ui_profiles": {
+    "message": "Profile und Kurzbefehle"
+  },
+  "ui_back": {
+    "message": "Zurück"
+  },
+  "ui_coming": {
+    "message": "Weitere Werkzeuge folgen – dies ist die vollständige Liste. Jedes wird aktiv, sobald es fertig ist."
+  },
+  "ui_free": {
+    "message": "Für immer kostenlos und quelloffen."
+  },
+  "ui_credit_pre": {
+    "message": "Mit Liebe gemacht von "
+  },
+  "ui_credit_post": {
+    "message": ", für Menschen mit Sehbehinderung 💛"
+  },
+  "ui_this_page": {
+    "message": "diese Seite"
+  },
+  "aria_tools": {
+    "message": "Werkzeuge für Barrierefreiheit"
+  },
+  "aria_enable": {
+    "message": "Notte auf dieser Seite aktivieren"
+  },
+  "pill_soon": {
+    "message": "Demnächst"
+  },
+  "btn_apply": {
+    "message": "Anwenden"
+  },
+  "btn_set": {
+    "message": "Festlegen"
+  },
+  "val_off": {
+    "message": "OFF"
+  },
+  "aria_contrast_aaa": {
+    "message": "Kontrast: AAA"
+  },
+  "aria_contrast_off": {
+    "message": "Kontrast: aus"
+  }
+}

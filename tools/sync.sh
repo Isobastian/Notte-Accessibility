@@ -4,7 +4,8 @@
 #
 # Only manifest.json differs per browser, so it is NEVER copied here.
 # Everything else (the engine, the popup, the icons) has a single master
-# copy in chrome/ and is mirrored into firefox/ and safari/ by this script.
+# copy in chrome/ and is mirrored into firefox/ and safari/ by this script
+# (engine, popup, icons, fonts and _locales).
 set -e
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 for B in firefox safari; do
@@ -26,6 +27,22 @@ for B in firefox safari; do
   rm -f "$ROOT/$B/fonts/"*.woff2
   cp "$ROOT/chrome/fonts/"*.woff2 "$ROOT/$B/fonts/"
   cp "$ROOT/chrome/fonts/OFL.txt" "$ROOT/$B/fonts/" 2>/dev/null || true
+  # Locales (same rule: copy the individual message files, never a dir into a
+  # dir). Note this ADDS and OVERWRITES but never deletes: if you remove a
+  # locale from chrome/_locales, delete it from firefox/ and safari/ by hand.
+  for L in "$ROOT/chrome/_locales"/*/; do
+    LOC="$(basename "$L")"
+    mkdir -p "$ROOT/$B/_locales/$LOC"
+    cp "$L/messages.json" "$ROOT/$B/_locales/$LOC/"
+  done
+  # Sync never deletes. Warn if a locale exists here but no longer in chrome/,
+  # otherwise a removed language would quietly keep shipping.
+  for T in "$ROOT/$B/_locales"/*/; do
+    [ -d "$T" ] || continue
+    LOC="$(basename "$T")"
+    [ -d "$ROOT/chrome/_locales/$LOC" ] || \
+      echo "  WARNING: $B/_locales/$LOC is not in chrome/_locales — delete it by hand"
+  done
   echo "synced: $B"
 done
 echo "Done. The manifest.json files are NOT touched (they differ per browser)."
