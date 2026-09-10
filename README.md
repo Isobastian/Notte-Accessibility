@@ -160,6 +160,40 @@ xcrun safari-web-extension-converter /path/to/safari \
 Open in Xcode, set your signing **Team**, **Run**, then enable it in
 **Settings → Safari → Extensions**.
 
+## How Notte is built — AI provenance
+
+Notte's **source code is written by an AI assistant working from my
+specifications**. I state it here rather than leave it to be discovered, because
+anyone reading, auditing or forking this repository deserves to know how the code
+in front of them came to exist.
+
+**The model that writes the code:** Anthropic's **Claude**, used through the Claude
+desktop app and Claude Code. From **10 September 2026** onward, each commit whose
+content was model-generated carries the specific model in a trailer:
+
+```
+Assisted-by: <model identifier>
+```
+
+Git history cannot be annotated after the fact, so to be unambiguous about
+everything that came before that date: **assume all source code in this repository
+was written by Claude from my specifications**, unless a commit says otherwise.
+
+**What is mine.** The idea and the scope. The research. The brand, the interface,
+every component in it, and the feature imagery. The architecture. Every
+accessibility decision. The roadmap, the MVP scope, the release sequence. The
+testing of every build against real websites, the diagnosis of what fails, and the
+decision about how it gets fixed. And the responsibility for whether the result is
+correct.
+
+I do not write code by hand — programming is not among my skills, so I contract
+that one step out. The design decisions the code expresses are mine, and I can
+account for all of them. Most of the hard-won details in `content.js` exist because
+something broke on a real site, I chased it, and I decided what the fix should be.
+
+If you contribute code, you are welcome to use whatever tools you like; please just
+say so in your pull request, in the same spirit.
+
 ## Contributing & community
 
 Everyone is welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) and our

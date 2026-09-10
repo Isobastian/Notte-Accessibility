@@ -20,13 +20,38 @@ iPad and Mac).
   toolkit**; dark mode is the *entry* feature, not the whole product. It is
   explicitly **not** a site-owner "accessibility overlay" (accessiBe / UserWay
   category — legally toxic, community-condemned, against the mission).
-- **License:** **MIT** (see `LICENSE`). A move to AGPL-3.0 was considered and
-  **deferred in September 2026** — do not treat it as a pending task. NLnet
-  requires only "an adequate open license", which MIT already satisfies, and
-  AGPL-family licences conflict with Apple's App Store terms, where Notte is live.
-  Revisit only as a deliberate product decision, never as a funding requirement.
+- **License:** **MIT** (see `LICENSE`) — that is what ships today, and nothing in
+  the repository should be relicensed without a deliberate decision.
+  **Open item (10 Sep 2026): the submitted NLnet proposal promises AGPL-3.0.**
+  Application **2026-11-017** (Restack Fund, submitted 3 Sep 2026) names AGPL-3.0 in
+  three places: milestone **M9** commits to "AGPL-3.0 relicensing" as a funded
+  deliverable, the *comparison* section says the reusable components are published
+  "under AGPL-3.0", and the *ecosystem* section describes the outputs as
+  "digital commons: AGPL-3.0". The repository is MIT, so proposal and repository
+  currently disagree.
+  The facts that decide it: NLnet asks only for "an adequate open license" — it
+  names no licence and requires no copyleft, and MIT satisfies it; AGPL-family
+  terms conflict with Apple's App Store rules, which add usage restrictions that
+  GPL-family licences forbid, and Notte is live on the App Store; and AGPL's
+  distinguishing clause (§13, the network/SaaS clause) can never apply to a browser
+  extension, so it would buy nothing here. If copyleft is ever wanted on its
+  merits, **MPL-2.0** gives file-level copyleft with no Apple conflict.
+  **Do not relicense on your own initiative, and do not treat AGPL as an NLnet
+  requirement — it never was.** The resolution paths (fix it in the stage-two
+  memorandum of understanding, resubmit a corrected proposal before 3 Nov 2026, or
+  keep the promise and grant an App Store exception under AGPLv3 §7) are set out in
+  `claude/nlnet-submission-pack.md`. Sole authorship is what makes any of them
+  possible: accepting an outside contribution without a CLA ends the ability to
+  change or except the licence unilaterally.
 - **Docs language:** the repository is **English-only**. Keep new docs and
   comments in English.
+- **Funding:** no funding, sponsorship, donations or revenue, ever. One grant
+  application is pending — NLnet **2026-11-017**, Restack Fund, €30,100 for 86 days
+  across 9 milestones, submitted 3 September 2026. It changes nothing about the
+  product: Notte stays free and unmonetised either way. Two claims in that proposal
+  are written in the present tense and must be true in the repository — the README
+  GenAI provenance note and commit-level model disclosure (NLnet's GenAI policy
+  requires both for funded work).
 
 ## Principles to respect (important)
 
