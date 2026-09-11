@@ -1,12 +1,12 @@
 # CLAUDE.md — Notte — Accessibility & Dark Mode
 
-Context for Claude when working on this project (on Mac or Windows).
+Context for Claude, or any contributor, working on this repository.
 
 ## What it is
 
 Notte is a **free** browser extension that darkens overly bright websites. It was
 born as an **accessibility tool for the low-vision community** (the author has a
-degenerative eye condition). It must stay free, with no ads, no donations, and no
+degenerative eye condition). It must stay free, with no ads, no donations and no
 tracking.
 
 One codebase, three browsers: **Chrome, Firefox, Safari** (Safari covers iPhone,
@@ -19,39 +19,26 @@ iPad and Mac).
 - **Pillar = accessibility.** Notte is a **user-side low-vision accessibility
   toolkit**; dark mode is the *entry* feature, not the whole product. It is
   explicitly **not** a site-owner "accessibility overlay" (accessiBe / UserWay
-  category — legally toxic, community-condemned, against the mission).
-- **License:** **MIT** (see `LICENSE`) — that is what ships today, and nothing in
-  the repository should be relicensed without a deliberate decision.
-  **Open item (10 Sep 2026): the submitted NLnet proposal promises AGPL-3.0.**
-  Application **2026-11-017** (Restack Fund, submitted 3 Sep 2026) names AGPL-3.0 in
-  three places: milestone **M9** commits to "AGPL-3.0 relicensing" as a funded
-  deliverable, the *comparison* section says the reusable components are published
-  "under AGPL-3.0", and the *ecosystem* section describes the outputs as
-  "digital commons: AGPL-3.0". The repository is MIT, so proposal and repository
-  currently disagree.
-  The facts that decide it: NLnet asks only for "an adequate open license" — it
-  names no licence and requires no copyleft, and MIT satisfies it; AGPL-family
-  terms conflict with Apple's App Store rules, which add usage restrictions that
-  GPL-family licences forbid, and Notte is live on the App Store; and AGPL's
-  distinguishing clause (§13, the network/SaaS clause) can never apply to a browser
-  extension, so it would buy nothing here. If copyleft is ever wanted on its
-  merits, **MPL-2.0** gives file-level copyleft with no Apple conflict.
-  **Do not relicense on your own initiative, and do not treat AGPL as an NLnet
-  requirement — it never was.** The resolution paths (fix it in the stage-two
-  memorandum of understanding, resubmit a corrected proposal before 3 Nov 2026, or
-  keep the promise and grant an App Store exception under AGPLv3 §7) are set out in
-  `claude/nlnet-submission-pack.md`. Sole authorship is what makes any of them
-  possible: accepting an outside contribution without a CLA ends the ability to
-  change or except the licence unilaterally.
-- **Docs language:** the repository is **English-only**. Keep new docs and
+  category — legally contested, community-condemned, against the mission).
+- **Licence: MIT** (see `LICENSE`). Do not relicense without a deliberate
+  decision by the maintainer — AGPL-family terms conflict with Apple's App Store
+  rules, and Notte ships on the App Store. Sole authorship is what keeps that
+  decision open: accepting an outside contribution without a CLA ends the ability
+  to change or except the licence unilaterally.
+- **Docs language:** this repository is **English-only**. Keep new docs and
   comments in English.
-- **Funding:** no funding, sponsorship, donations or revenue, ever. One grant
-  application is pending — NLnet **2026-11-017**, Restack Fund, €30,100 for 86 days
-  across 9 milestones, submitted 3 September 2026. It changes nothing about the
-  product: Notte stays free and unmonetised either way. Two claims in that proposal
-  are written in the present tense and must be true in the repository — the README
-  GenAI provenance note and commit-level model disclosure (NLnet's GenAI policy
-  requires both for funded work).
+- **Funded, unfunded and roadmap status live outside this file.** This file is
+  about the code.
+
+## AI provenance
+
+Notte's code is written by an AI assistant from the maintainer's specifications.
+The design, architecture and accessibility decisions and the testing are the
+maintainer's. `README.md` carries the full provenance note. Every commit carrying
+model-written content gets an `Assisted-by: <model identifier>` trailer, from
+**10 September 2026** onward; history before that date is covered by a blanket
+statement in the README, because git history cannot be annotated retroactively.
+**If you change code here, include that trailer.**
 
 ## Principles to respect (important)
 
@@ -76,17 +63,17 @@ iPad and Mac).
 chrome/     CANONICAL source + master icons. EDIT HERE, then run sync.sh.
               content.js       the dark-mode engine (one self-contained file)
               shadow-patch.js  MAIN-world shadow-DOM + CSSOM hook
-              background.js     service worker: cross-origin CSS fetch relay
-              popup.html        the popup UI
-              popup.js          the popup logic
-              manifest.json     Chrome manifest
-              images/           master extension icons (48…512) — synced to the others
-              fonts/            bundled OpenDyslexic woff2 + OFL.txt — synced to the others
-              _locales/         UI strings: en (British, default) · en_US · it · fr · de · es
+              background.js    service worker: cross-origin CSS fetch relay
+              popup.html       the popup UI
+              popup.js         the popup logic
+              manifest.json    Chrome manifest
+              images/          master extension icons (48…512) — synced to the others
+              fonts/           bundled OpenDyslexic woff2 + OFL.txt — synced to the others
+              _locales/        UI strings: en (British, default) · en_US · it · fr · de · es
 firefox/    Same shared files + Firefox manifest (adds browser_specific_settings.gecko
               id + gecko_android for Firefox-Android; background uses "scripts").
 safari/     Same shared files + Safari manifest, wrapped with Xcode for iOS + macOS.
-              app-icons/        the macOS/iOS APP icons (Safari-only; set in Xcode).
+              app-icons/       the macOS/iOS APP icons (Safari-only; set in Xcode).
 tools/sync.sh   Copies the shared files (content.js, shadow-patch.js, background.js,
                 popup.html, popup.js, images/, fonts/, _locales/) from chrome/ into
                 firefox/ and safari/. It ADDS and OVERWRITES but never deletes: a
@@ -96,7 +83,7 @@ docs/           engine-v2-design.md (the engine design), store-listings.md.
 README.md · LICENSE · CHANGELOG.md · CONTRIBUTING.md · CODE_OF_CONDUCT.md ·
 SECURITY.md · ACCESSIBILITY.md · PRIVACY.md
 .github/ISSUE_TEMPLATE/  bug_report.md · feature_request.md · config.yml
-.gitattributes  Normalizes line endings across the Mac + Windows machines.
+.gitattributes  Normalizes line endings across Mac and Windows machines.
 ```
 
 **Canonical source = `chrome/`.** `content.js`, `shadow-patch.js`,
@@ -169,14 +156,16 @@ white). Remap is HSL banding: neutral (low-saturation) backgrounds → a fixed d
 accent colors → a lighter, separated band so highlights stay visible; text → a
 light band; borders → neutral/accent. Hue and saturation are preserved (accent
 saturation capped to avoid neon). Text/background contrast stays high (targets WCAG
-AA; ~11:1 average in testing). CSS custom properties get dark **variants**
-(background/foreground/border roles) — and when a variable is defined several times
-across selectors, a CSS-wide keyword (`initial`/`inherit`/`unset`/`revert`) is not
-allowed to clobber a real colour definition in the flattened var map (that bug left
-`var(--link-color)` link text un-themed on DeepL). SVG paints (`fill`/`stroke`) and
-HTML color attributes (`bgcolor`, `<font color>`) are handled; `light-dark()` /
-Tailwind fallbacks are covered. Light gradients are switched off; `url(...)` images
-and real media are left untouched.
+AA; ~11:1 average in testing, measured against a fixed reference background rather
+than the surface actually painted behind the glyphs — see *Known limits*). CSS
+custom properties get dark **variants** (background/foreground/border roles) — and
+when a variable is defined several times across selectors, a CSS-wide keyword
+(`initial`/`inherit`/`unset`/`revert`) is not allowed to clobber a real colour
+definition in the flattened var map (that bug left `var(--link-color)` link text
+un-themed on DeepL). SVG paints (`fill`/`stroke`) and HTML color attributes
+(`bgcolor`, `<font color>`) are handled; `light-dark()` / Tailwind fallbacks are
+covered. Light gradients are switched off; `url(...)` images and real media are
+left untouched.
 
 **Shadow DOM.** Content scripts run in an isolated JS world, so `shadow-patch.js`
 is injected with `world:"MAIN"`: it forces `mode:"open"` even on closed roots,
@@ -223,18 +212,17 @@ text *and* 7.4:1 against the `#141414` page, so the highlight itself is
 unmistakable. `text-shadow:none` stops a site glow smearing the selected glyphs,
 and `-webkit-text-fill-color` is set alongside `color` because a
 `background-clip:text` gradient heading has a transparent fill that swallows
-`color` alone. Every engine Notte ships on honours an author `::selection` in **both** the
-focused and the unfocused state, so one rule covers both; the second rule,
-`::selection:window-inactive`, is Safari insurance — WebKit's own pseudo-class,
-parsed by Chromium, dropped by Firefox as unknown.
+`color` alone. Every engine Notte ships on honours an author `::selection` in
+**both** the focused and the unfocused state, so one rule covers both; the second
+rule, `::selection:window-inactive`, is Safari insurance — WebKit's own
+pseudo-class, parsed by Chromium, dropped by Firefox as unknown.
 **Verified in both engines, in both states:** Chromium headless (pixel-compared,
-focused vs unfocused) and Firefox 155 on Windows, with the probe kept at
-`Claude outputs/notte-selection-firefox-test.html` — re-run it if a future
-browser regresses. The two engines failed *differently*, which is why both
-declarations are load-bearing: Chromium forces its own near-black foreground
-onto a grey background, while Gecko keeps its light grey behind the **page's**
-text colour (`#e8e6e3` on a Notte page — light on light, invisible), so only
-`color` rescues Firefox and only `background-color` rescues Chromium.
+focused vs unfocused) and Firefox 155 on Windows. The two engines failed
+*differently*, which is why both declarations are load-bearing: Chromium forces
+its own near-black foreground onto a grey background, while Gecko keeps its light
+grey behind the **page's** text colour (`#e8e6e3` on a Notte page — light on
+light, invisible), so only `color` rescues Firefox and only `background-color`
+rescues Chromium.
 Do **not** trust [bugzilla 706209](https://bugzilla.mozilla.org/show_bug.cgi?id=706209)
 ("no way to style the selection in inactive windows"): it is still open, but
 Gecko has moved on and modern Firefox applies both halves. Firefox parses
@@ -272,10 +260,10 @@ you change the data shape in one, check the other.
 
 ### Modes & where tools apply (v3)
 
-`theme.mode` is now **`dark` | `light` | `off`**. Notte activates when dark mode
+`theme.mode` is **`dark` | `light` | `off`**. Notte activates when dark mode
 applies **or any tool is on**, on any page:
 
-- **`dark`** — full colour remap (as before); every tool layers on top.
+- **`dark`** — full colour remap; every tool layers on top.
 - **`light`** — a **bright page** (dark off) with tools on. The page keeps its own
   light colours: `transformDeclaration`/`remap` are gated to **text only** and only
   when **Contrast** is set (it *darkens* text toward black against a light
@@ -283,6 +271,7 @@ applies **or any tool is on**, on any page:
 - **`off`** — nothing injected.
 
 Tools split by how they're applied (all of it in `chrome/content.js` — there is no `src/`):
+
 - **Contrast** → `remap()` fg path (dark: brighten; light: darken). `lightContrast`
   gates the text pass so we never darken text on an already-dark page.
 - **Warm tint / Brightness / Saturation** → **two** fixed sibling layers, never
@@ -290,12 +279,40 @@ Tools split by how they're applied (all of it in `chrome/content.js` — there i
   z-index 2147483646) and, above it, `#__notte_warm__` (warm `multiply`,
   z-index 2147483647). Works in both modes; avoids `filter` on `<html>` (which
   breaks `position:fixed`). **Do not merge them back into one element** — see the
-  WebKit note below.
+  WebKit note above.
 - **Links / Reduce motion / Strong focus / Dim images / Text size / Letter+word
   spacing / Paragraph (line) spacing / Font** → one injected `#__notte_adjust__`
   rule sheet (`buildAdjustCSS`).
 
 Everything Notte injects carries `data-notte` so our own observers skip it.
+
+### Known limits of the current engine
+
+Worth knowing before you change the colour model:
+
+- **Contrast is measured against an assumed backdrop.** `remap()` brightens text
+  until it clears a ratio against a fixed reference (`AA_BG` = `#2c2c2c`, or
+  `#404040` when the Contrast tool is on). At rule-transform time there is no way
+  to know which surface the text will actually land on, and the background ramp
+  can reach L=46% for a saturated colour. A text colour and the colour behind it
+  are therefore decided by two passes that never meet.
+- **The custom-property map is flattened per document.** `collectVarDefs()` is
+  last-wins across the whole document, and the three emitted role variants
+  (`--nt-bg-` / `--nt-fg-` / `--nt-br-`) are a guess about how a variable will be
+  used. A site that redefines the same variable in several scopes collapses to one
+  value.
+- **HSL lightness is not perceptual.** `dampS()`, `accentFactor()`, the
+  `BG_L_FLOOR → BG_L_PEAK` ramp and the `S > 40` threshold are all corrections
+  around that.
+- **Some colour functions pass through untouched.** `parseColor()` returns `null`
+  for `lab()`, `lch()`, `oklab()` and `hwb()`, and `color-mix()` is not handled at
+  all — those surfaces stay bright.
+- **The cross-origin sheet is append-only.** `fetchAndApply()` does
+  `textContent +=`, so a settings change re-themes same-origin CSS live while
+  already-fetched cross-origin sheets update only on the next page load.
+- **Content scripts do not hot-swap.** A new `content.js` takes effect in a tab
+  only after that page is reloaded — after reloading the extension, refresh the
+  test tabs.
 
 ## Localisation (popup UI)
 
@@ -343,15 +360,15 @@ in `popup.js` or `data-i18n="key"` in `popup.html`, then run `sync.sh`.
 ### Tools that are not built yet
 
 The six unfinished tools (read aloud, reading ruler, magnifier, large cursor, preset,
-shortcuts) show their **name inside a chip with a clock icon** (`.soonchip`, Figma
-139:66), and their control is dimmed (`.item.pending`). There is deliberately **no
-badge word on screen**: a separate "SOON" pill sat beside `.name`, which is
-`white-space:nowrap` and cannot shrink, so it capped how long any translated tool name
-could be — Italian *Righello di lettura* + *IN ARRIVO* overflowed the 360px popup.
-The wording survives as a screen-reader-only label (`pill_soon`, sentence case because
-some screen readers spell out capitals), so a blind user still hears that the tool is
-not ready, in their language. The chip reuses the old `.pill` background, border and
-radius, and `#a09bdd` was already the pill's text colour — no new tokens.
+shortcuts) show their **name inside a chip with a clock icon** (`.soonchip`), and
+their control is dimmed (`.item.pending`). There is deliberately **no badge word on
+screen**: a separate "SOON" pill sat beside `.name`, which is `white-space:nowrap`
+and cannot shrink, so it capped how long any translated tool name could be — Italian
+*Righello di lettura* + *IN ARRIVO* overflowed the 360px popup. The wording survives
+as a screen-reader-only label (`pill_soon`, sentence case because some screen readers
+spell out capitals), so a blind user still hears that the tool is not ready, in their
+language. The chip reuses the old `.pill` background, border and radius, and
+`#a09bdd` was already the pill's text colour — no new tokens.
 
 ## Build / quick test
 
@@ -364,7 +381,7 @@ There is no build — just load the folders.
 - **Safari:** on a Mac →
   `xcrun safari-web-extension-converter ./safari --app-name "Notte" --bundle-identifier com.yourname.notte --project-location ~/Desktop`
   → open in Xcode, set the signing Team, Run. The macOS/iOS app icons live in
-  `safari/app-icons/`.
+  `safari/app-icons/`. The Safari bundle identifier must be unique.
 
 Check which engine is running: in the page console,
 `document.documentElement.getAttribute('data-notte-build')`.
@@ -382,6 +399,9 @@ Check which engine is running: in the page console,
   (`shadow-patch.js` in `world:"MAIN"`, then `content.js`) at `document_start`,
   `all_frames:true`.
 
+`sync.sh` never copies manifests — edit each by hand and keep the three versions
+equal.
+
 ## Checks before committing
 
 - JSON-validate all 3 manifests:
@@ -389,19 +409,21 @@ Check which engine is running: in the page console,
 - JSON-validate the locale files too — a malformed `messages.json` makes the whole
   extension fail to load, not just that language.
 - If you touched popup strings: check the popup in a long language (German) at
-  maximum Text size. See *Localisation* below for how to open one.
+  maximum Text size. See *Localisation* for how to open one.
 - `node --check` on `content.js`, `background.js`, `shadow-patch.js`, `popup.js`.
 - Test on at least one light site and one site with its own dark mode.
 - If you touched the shared files: run `bash tools/sync.sh`.
+- Make sure the debug timing logs are off — `var NBG = false` in `content.js` —
+  before any store upload. Turn them on only while debugging locally.
+- Include the `Assisted-by: <model identifier>` trailer if the commit carries
+  model-written content.
 
 ## Publishing / releases
 
 - Bump `version` in the **three** `manifest.json` files each release (keep them
   equal). Also create a matching **git tag** + a **GitHub Release**, and add a
   `CHANGELOG.md` entry.
-- Current version is `2.0.1` in the three manifests. `2.0.0` is what is live on
-  all three stores; 2.0.1 is built and not yet uploaded. Note the bigger
-  `host_permissions` in the store review at each submission.
+- Note the broad `host_permissions` in the store review at each submission.
 - **All three listings are live and public:**
   - Chrome Web Store — https://chromewebstore.google.com/detail/lmackbhliaaledjdnkhjnfheideaefmj
   - Firefox AMO — https://addons.mozilla.org/firefox/addon/notte-accessibility-dark-mode/
@@ -414,74 +436,37 @@ Check which engine is running: in the page console,
 - Store-listing metadata (incl. Safari's 30/30/100 title/subtitle/keywords):
   `docs/store-listings.md`.
 
-## Session log — 2026-08-24
-
-- **Everything is wired and live.** The full v3 accessibility toolkit is now
-  wired end-to-end (popup → storage → engine) and shipping in the working build —
-  no longer a partial/experimental path. All tools read their per-site key and
-  apply through the engine.
-- **Tools work on bright pages.** The engine now activates whenever dark mode
-  applies **or any tool is on**, so the toolkit works on ordinary bright pages with
-  dark mode off (`light` mode — see *Modes & where tools apply*). Contrast on a
-  bright page darkens text toward black; the overlay + `#__notte_adjust__` tools
-  layer on regardless of mode.
-
 ## Roadmap
 
-- **Now — dark mode + v3 toolkit on the new engine, live.** The
-  stylesheet-transformation engine is the shipping engine and is solid on the hard
-  sites, and as of 2026-08-24 the v3 tools are wired and live on **dark AND bright**
-  pages. Recent fixes: fast cover reveal (no more 2–3s flat-dark on Outlook Web),
-  modern Tailwind / CSS-Color-4 colour syntax (DeepL white buttons/panels), and the
-  variable-keyword clobber fix (DeepL `var(--link-color)` links). Current build tag:
-  `v3.0-tools-on-bright` (v3 tools wired + bright-page support).
-- **v3 accessibility toolkit — tools now wired on dark AND bright pages.** The
-  engine activates whenever dark mode applies **or any tool is on** (see *Modes &
-  where tools apply* above). **Wired now:** Contrast (OFF↔AAA), Warm tint,
-  Emphasize links, Reduce motion, Strong focus, Brightness, Saturation, Dim images,
-  Text size, Letter spacing, Paragraph spacing, Font. Each reads a per-site key into
-  the `theme` object (`loadAndRender`) and is applied by `remap()` (Contrast), the
-  overlay (warmth/brightness/saturation), or the `#__notte_adjust__` rule sheet
-  (everything else). Contrast is a 2-stop switch (OFF↔AAA); on a bright page it
-  darkens text toward black (measuring against a light reference), on a dark page it
-  brightens toward white (~12:1).
-  - *Still SOON (standalone modules, not page-CSS tools):* Read aloud (TTS), Reading
-    ruler, Magnifier (§3a), Large cursor, and the Profile plumbing (Remember /
-    Preset / Shortcuts). Build these as their own components.
-  - *Font — done:* real **OpenDyslexic** is bundled (`chrome/fonts/*.woff2` +
-    `OFL.txt`, an `@font-face` in `content.js`, files declared in
-    `web_accessible_resources`, mirrored by `sync.sh`). **Text size** scales the
-    root `font-size`, so rem-based sites benefit most; px-hardcoded sites less.
-  - *Known limits:* a settings change re-themes same-origin CSS live, but
-    already-fetched **cross-origin** sheets update on the next page load. Also, a new
-    `content.js` only takes effect on a tab **after that page is reloaded** (content
-    scripts don't hot-swap) — after reloading the extension, refresh the test tabs.
-- **Fast follows.** Magnifier, reading guide, large cursor, read-aloud, presets.
+- **Now — dark mode + the v3 toolkit on the stylesheet-transformation engine,
+  live on all three stores.** The engine is the shipping engine and is solid on
+  the hard sites; the v3 tools are wired and live on **dark AND bright** pages.
+  **Wired:** Contrast (OFF↔AAA), Warm tint, Emphasize links, Reduce motion,
+  Strong focus, Brightness, Saturation, Dim images, Text size, Letter spacing,
+  Paragraph spacing, Font. Each reads a per-site key into the `theme` object
+  (`loadAndRender`) and is applied by `remap()` (Contrast), the overlay
+  (warmth/brightness/saturation), or the `#__notte_adjust__` rule sheet
+  (everything else).
+- **Font — done:** real **OpenDyslexic** is bundled (`chrome/fonts/*.woff2` +
+  `OFL.txt`, an `@font-face` in `content.js`, files declared in
+  `web_accessible_resources`, mirrored by `sync.sh`). **Text size** scales the
+  root `font-size`, so rem-based sites benefit most; px-hardcoded sites less.
+- **Still to build — standalone modules, not page-CSS tools:** Read aloud (TTS),
+  Reading ruler, Magnifier, Large cursor, and the Profile plumbing (Remember /
+  Preset / Shortcuts). Build these as their own components.
+- **Also open:** tuning the slider→effect maps in `loadAndRender`
+  (`content.js`): text scale `1 + pct/100*0.8`, letter `pct/100*0.2em`,
+  line-height `1.5 + pct/100*0.7`, brightness/saturation/dimimg = `pct/100`.
+  Try them on real sites and adjust the ranges to taste.
+- **Also open:** an automated harness that measures the contrast Notte actually
+  delivers across a corpus of real sites and fails on regressions — see
+  *Known limits*.
 
-## TODO — next session
+## Contributing
 
-1. **Tune the slider→effect maps.** The 0..100 → effect mappings live in
-   `loadAndRender` (`content.js`): text scale `1 + pct/100*0.8`, letter `pct/100*0.2em`,
-   line-height `1.5 + pct/100*0.7`, brightness/saturation/dimimg = `pct/100`. Try them
-   on real sites and adjust ranges to taste.
-2. **Standalone modules.** Build Magnifier (§3a), Reading ruler, Large cursor,
-   Read-aloud, and the Profile plumbing (Remember / Preset / Shortcuts) — still SOON.
+Read `CONTRIBUTING.md` first. The short version: edit in `chrome/`, run
+`tools/sync.sh`, run the checks above, keep the file count flat, and don't
+introduce a build step. If something in the repository surprises you, ask before
+changing it — several of the notes above look like over-engineering and are not.
 
-*All three manifest `description` fields carry the `store-listings.md` text as of
-9 September 2026 — the pre-rebrand Italian string in `firefox/manifest.json` is gone.
-It reaches Firefox users at the next release (2.0.2); 2.0.1 shipped with the old one.
-`sync.sh` never copies manifests — edit each by hand, keep the three versions equal.*
-
-*Housekeeping:* the debug timing logs (`nlog`) are **off** — `var NBG = false` in
-`content.js` since the 2.0.1 release prep (9 September 2026). Turn it back on only
-while debugging locally, and make sure it is `false` again before any store upload.
-
-## Operating notes
-
-- The author works from **two machines** — **GitHub Desktop on Windows** and
-  **Xcode on the Mac** — synced through GitHub Desktop (pull before starting, push
-  when done; `.gitattributes` keeps line endings clean). Prefer simple,
-  step-by-step instructions; do not assume command-line git familiarity.
-- **Don't assume — ask.** If the repo state is surprising, ask before changing it.
-- GitHub repo: `Isobastian/Notte-Accessibility`.
-- The Safari bundle identifier must be unique (e.g. `com.yourname.notte`).
+GitHub repo: `Isobastian/Notte-Accessibility`.
