@@ -67,13 +67,17 @@ chrome/     CANONICAL source + master icons. EDIT HERE, then run sync.sh.
               popup.html       the popup UI
               popup.js         the popup logic
               manifest.json    Chrome manifest
-              images/          master extension icons (48…512) — synced to the others
+              images/          master icons, synced to the others: the SQUARE store icon
+                               (icon-16…512, manifest.icons) and the CIRCLE toolbar icon
+                               (toolbar-16…64, action.default_icon). Two different jobs.
               fonts/           bundled OpenDyslexic woff2 + OFL.txt — synced to the others
               _locales/        UI strings: en (British, default) · en_US · it · fr · de · es
 firefox/    Same shared files + Firefox manifest (adds browser_specific_settings.gecko
               id + gecko_android for Firefox-Android; background uses "scripts").
 safari/     Same shared files + Safari manifest, wrapped with Xcode for iOS + macOS.
               app-icons/       the macOS/iOS APP icons (Safari-only; set in Xcode).
+                               **No alpha CHANNEL** — App Store Connect rejects any alpha
+                               (ITMS-90717), even when every pixel is opaque. Save as RGB.
 tools/sync.sh   Copies the shared files (content.js, shadow-patch.js, background.js,
                 popup.html, popup.js, images/, fonts/, _locales/) from chrome/ into
                 firefox/ and safari/. It ADDS and OVERWRITES but never deletes: a
@@ -243,9 +247,9 @@ working one down with it in Gecko.
   links:      { "example.com": true },       // underline every link
   motion:     { "example.com": true },       // reduce motion
   focus:      { "example.com": true },       // strong focus outline
-  brightness: { "example.com": 0..100 },     // <100 dims the page (100 = off)
-  saturation: { "example.com": 0..100 },     // <100 mutes colour, 0 = grey (100 = off)
-  dimimg:     { "example.com": 0..100 },     // <100 dims images (100 = off)
+  brightness: { "example.com": 10..100 },    // ten detents 10,20…100 (100 = off). NOT 0: that is a black page
+  saturation: { "example.com": 0..100 },     // ten detents 0,11…100 (100 = off; 0 = fully grey, which is a real setting)
+  dimimg:     { "example.com": 10..100 },    // ten detents 10,20…100 (100 = off). NOT 0: that is black images
   textsize:   { "example.com": 0..100 },     // >0 enlarges text (0 = off)
   letter:     { "example.com": 0..100 },     // >0 adds letter/word spacing (0 = off)
   paragraph:  { "example.com": 0..100 },     // >0 opens up line spacing (0 = off)
@@ -253,10 +257,30 @@ working one down with it in Gecko.
 }
 ```
 
-Sliders store **0..100 (track position)**; the popup stays generic and the engine
-(`loadAndRender`) maps each value to its real effect, treating the no-op end as
-"off". `content.js` and `popup.js` each carry their own key list / `DEFAULTS`. If
-you change the data shape in one, check the other.
+Sliders store **0..100**; the engine (`loadAndRender`) maps each value to its real
+effect and treats the no-op end as "off". `content.js` and `popup.js` each carry
+their own key list / `DEFAULTS` — change the shape in one, check the other.
+
+**Sliders are detented (2.0.2).** The popup is not an `<input type=range>` but a
+`div.slider > .rail + .tick×10 + .knob`, so the detents are in the logic: the
+control only ever computes a **stop** (1..10) and converts it to a **value**
+(0..100) — there is no continuous value to snap afterwards, so nothing can land
+between detents. Each item may declare `min`/`max` (default `0..100`); brightness
+and dimimg use `min:10` because both become `filter:brightness(v/100)` and 0 is a
+black page and black images. Saturation keeps its 0 — there it means *fully grey*,
+which the tool promises. Every tool's `off` value still lands exactly on a detent,
+so a detent can never switch a tool on by accident, and `content.js` needed no
+change. Values stored before 2.0.2 are continuous and are rounded to the nearest
+detent on read — never discarded.
+
+The exposed scale is **1..10, not 0..100**: `aria-valuemin/now/max` and an
+`aria-valuetext` reading "6 of 10" (message key `aria_step`). Arrows move one stop,
+Home/End jump to the ends.
+
+**`KNOB_W` in `popup.js` and the rail inset in `popup.html` must change together.**
+The knob is a 41px circle (matching `.sw .knob` exactly), the rail is inset
+`KNOB_W/2` = 20.5px at each end so it begins on the first detent and ends on the
+last, and the marks are positioned from the same `stopPct()` the knob uses.
 
 ### Modes & where tools apply (v3)
 
@@ -319,7 +343,7 @@ Worth knowing before you change the colour model:
 Six locales live in `chrome/_locales/`, mirrored by `sync.sh`:
 
 ```
-en/      British English — the default_locale, ~57 messages
+en/      British English — the default_locale, 58 messages
 en_US/   American English — 2 messages only
 it/  fr/  de/  es/
 ```
@@ -378,10 +402,21 @@ There is no build — just load the folders.
   unpacked* → the **`chrome/`** folder.
 - **Firefox:** `about:debugging` → *Load Temporary Add-on* → any file in
   **`firefox/`**.
-- **Safari:** on a Mac →
-  `xcrun safari-web-extension-converter ./safari --app-name "Notte" --bundle-identifier com.yourname.notte --project-location ~/Desktop`
-  → open in Xcode, set the signing Team, Run. The macOS/iOS app icons live in
-  `safari/app-icons/`. The Safari bundle identifier must be unique.
+- **Safari:** the Xcode project **already exists** — `~/Desktop/Notte/Notte.xcodeproj`
+  on the maintainer's iMac, outside this repository. **Open that one; never run the
+  converter again** — the App Store listing, the bundle identifiers
+  (`com.sebastiannicosia.notte` / `.Extension`), the signing and the version history
+  are tied to it, and a fresh project is a different app.
+  Both extension targets reference **this repo** by relative path
+  (`../../../Documents/GitHub/Notte-Accessibility/safari/…`), with `images`, `fonts`
+  and `app-icons` as **folder references** — so editing `safari/` here updates the
+  Xcode build with nothing to drag. The toolbar icon in particular comes from
+  `manifest.json` → `action.default_icon`; there is no Xcode slot for it. The app's
+  own artwork lives in `Shared (App)/Assets.xcassets` (`AppIcon`, and `LargeIcon`
+  for the container window) plus `Shared (App)/Resources/Icon.png`.
+  Version and build come from `MARKETING_VERSION` / `CURRENT_PROJECT_VERSION` on
+  **all four targets** — an extension whose build number differs from its containing
+  app is rejected at upload.
 
 Check which engine is running: in the page console,
 `document.documentElement.getAttribute('data-notte-build')`.
@@ -457,7 +492,8 @@ equal.
 - **Also open:** tuning the slider→effect maps in `loadAndRender`
   (`content.js`): text scale `1 + pct/100*0.8`, letter `pct/100*0.2em`,
   line-height `1.5 + pct/100*0.7`, brightness/saturation/dimimg = `pct/100`.
-  Try them on real sites and adjust the ranges to taste.
+  Try them on real sites and adjust the ranges to taste. Note each map now takes
+  **ten** inputs, not a continuum, so a bad curve shows up as a dead detent.
 - **Also open:** an automated harness that measures the contrast Notte actually
   delivers across a corpus of real sites and fails on regressions — see
   *Known limits*.
