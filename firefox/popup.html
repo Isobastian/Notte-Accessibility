@@ -108,12 +108,23 @@
     color:#251e8b;font-size:14px;font-weight:400;white-space:nowrap;filter:drop-shadow(0 0 2px rgba(0,0,0,.5));}
 
   /* ---- slider: Figma 36 tall, knob 45 x 32 ---- */
-  .slider{position:relative;width:100%;height:36px;}
-  .slider .rail{position:absolute;left:0;right:0;top:50%;transform:translateY(-50%);
+  .slider{position:relative;width:100%;height:45px;}
+  /* Inset by half a knob width each side so the rail begins and ends on the
+     first and last detent: the track must not imply travel that is not there.
+     20.5px = KNOB_W/2 in popup.js — change both together. */
+  .slider .rail{position:absolute;left:20.5px;right:20.5px;top:50%;transform:translateY(-50%);
     height:3px;border-radius:3px;background:rgba(157,151,246,.45);}
-  .slider .knob{position:absolute;top:2px;height:32px;width:45px;border-radius:24px;
+  .slider .knob{position:absolute;top:2px;height:41px;width:41px;border-radius:50%;z-index:1;
     background:radial-gradient(circle at 70% 28%,#fff 0%,#cecbfb 55%,#9d97f6 120%);
     filter:drop-shadow(0 0 2px rgba(0,0,0,.5));}
+  /* Detent marks. One per stop, centred on where the knob comes to rest; the
+     left offsets are written by popup.js from the same stopPct() the knob uses,
+     so marks and knob cannot drift apart. */
+  .slider .tick{position:absolute;top:50%;width:4px;height:4px;margin:-2px 0 0 -2px;
+    border-radius:50%;background:rgba(157,151,246,.85);pointer-events:none;}
+  /* The two ends anchor the range, so they carry twice the diameter. */
+  .slider .tick.end{width:8px;height:8px;margin:-4px 0 0 -4px;}
+  .slider.deact .tick{opacity:.45;}
 
   /* ---- outline button (Apply / Set): Figma 68 x 36 ---- */
   .obtn{flex:0 0 auto;min-width:68px;height:36px;display:inline-flex;align-items:center;justify-content:center;

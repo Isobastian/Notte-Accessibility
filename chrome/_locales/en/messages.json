@@ -169,5 +169,8 @@
   },
   "aria_contrast_off": {
     "message": "Contrast: off"
+  },
+  "aria_step": {
+    "message": "{n} of {max}"
   }
 }

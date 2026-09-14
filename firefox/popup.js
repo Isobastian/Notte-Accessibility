@@ -11,8 +11,19 @@
  * A handful of items are still SOON (standalone modules: read-aloud, reading
  * ruler, magnifier, large cursor; and the profile plumbing): shown but inert.
  *
- * Slider values are stored as 0..100 (position along the track). content.js maps
- * each to its real effect and treats the "no-op" end (item.off) as "tool off".
+ * Slider values are stored as 0..100. content.js maps each to its real effect and
+ * treats the "no-op" end (item.off) as "tool off".
+ *
+ * Sliders are DETENTED: every one lands on one of STOPS fixed positions and
+ * cannot stop between them. That is an accessibility decision, not a tidiness
+ * one — a continuous track asks for fine motor control AND the eyesight to see
+ * where the thumb landed, and Notte's users frequently have neither. It also
+ * gives the arrow keys a sane stride, lets aria-valuetext say "6 of 10" instead
+ * of a meaningless 47, and makes a setting nameable between two people.
+ *
+ * Each slider declares the stored range it spans. Brightness and Dim images
+ * start at 10, not 0: they become CSS brightness(v/100), so 0 is a black page
+ * and a black image. The far-left detent is the darkest USEFUL setting.
  */
 (function () {
   "use strict";
@@ -132,8 +143,14 @@
   var DEFAULTS = {};
   KEYS.forEach(function (k) { DEFAULTS[k] = {}; });
 
+  // Every slider has this many detents. Ten is a scale a person can say out
+  // loud ("I run 7 on that site") and cross with ten arrow presses.
+  var STOPS = 10;
+
   // place: "bottom" renders the control full-width beneath the label (like sliders).
   // key   : storage key. off: the slider value that means "tool off".
+  // min/max: the stored range the track spans (default 0..100). min:10 on the
+  //          two brightness-based tools keeps the left end useful, not black.
   var ITEMS = {
     vision: [
       { id: "dark",       name: "Dark mode",       desc: "Darken this site",                         type: "toggle", live: true },
@@ -143,9 +160,9 @@
       { id: "focus",      name: "Strong focus",    desc: "Make keyboard focus obvious",              type: "toggle", live: true, key: "focus" },
       { id: "contrast",   name: "Contrast",        desc: "Boost text contrast (AAA)",                type: "value",  live: true, val: "OFF", w: 95 },
       { divider: true },
-      { id: "brightness", name: "Brightness",      desc: "Dim bright pages",                         type: "slider", live: true, key: "brightness", off: 100 },
+      { id: "brightness", name: "Brightness",      desc: "Dim bright pages",                         type: "slider", live: true, key: "brightness", off: 100, min: 10 },
       { id: "saturation", name: "Saturation",      desc: "Mute colours, or go fully grey",           type: "slider", live: true, key: "saturation", off: 100 },
-      { id: "dimimg",     name: "Dim images",      desc: "Soften bright or busy images",             type: "slider", live: true, key: "dimimg", off: 100 }
+      { id: "dimimg",     name: "Dim images",      desc: "Soften bright or busy images",             type: "slider", live: true, key: "dimimg", off: 100, min: 10 }
     ],
     reading: [
       { id: "font",       name: "Dyslexia font",     desc: "Clearer, dyslexia-friendly",            type: "toggle", live: true },
@@ -211,6 +228,45 @@
     });
   }
 
+  /* ---------- detent maths -------------------------------------------------
+   * Two different numbers live here and must not be confused:
+   *   • the STOP  (1..STOPS) — what the user sees and hears, and what the
+   *     arrow keys move by.
+   *   • the VALUE (0..100)   — what is stored and what content.js reads.
+   * Brightness spans 10..100, so its stop 1 is value 10, not 0.
+   * The KNOB_W offset mirrors the CSS: the knob is 41px across and slides between
+   * the rail's ends, so its left edge travels from 0 to (track width - 41px).
+   * ---------------------------------------------------------------------- */
+  var KNOB_W = 41;
+
+  function sMin(it) { return typeof it.min === "number" ? it.min : 0; }
+  function sMax(it) { return typeof it.max === "number" ? it.max : 100; }
+
+  function stopToValue(it, i) {
+    var lo = sMin(it), hi = sMax(it);
+    return Math.round(lo + (hi - lo) * (i - 1) / (STOPS - 1));
+  }
+  // Legacy per-site values were continuous. Round them to the nearest detent
+  // rather than throwing them away: someone who has tuned twenty sites must
+  // find those sites still tuned after updating.
+  function valueToStop(it, v) {
+    var lo = sMin(it), hi = sMax(it);
+    if (hi === lo) return 1;
+    var f = (Math.max(lo, Math.min(hi, v)) - lo) / (hi - lo);
+    return Math.max(1, Math.min(STOPS, Math.round(f * (STOPS - 1)) + 1));
+  }
+  function defaultValue(it) { return typeof it.off === "number" ? it.off : sMin(it); }
+
+  // Track position of a stop, 0% at the far left, 100% at the far right.
+  function stopPct(i) { return (i - 1) / (STOPS - 1) * 100; }
+  // Left edge of the knob at that position.
+  function knobLeft(p) { return "calc(" + p + "% - " + ((p / 100) * KNOB_W).toFixed(1) + "px)"; }
+  // Centre of the knob at that position — where a detent mark belongs.
+  function tickLeft(p) {
+    var off = KNOB_W / 2 - (p / 100) * KNOB_W;
+    return "calc(" + p + "% " + (off < 0 ? "- " + (-off).toFixed(1) : "+ " + off.toFixed(1)) + "px)";
+  }
+
   /* ---------- control builders ---------- */
   function toggleEl(item) {
     var live = !!item.live;
@@ -233,10 +289,29 @@
   }
   function sliderEl(item) {
     var live = !!item.live;
-    var off = item.off || 0;
     var d = document.createElement("div");
     d.className = "slider" + (live ? "" : " deact");
-    d.innerHTML = '<div class="rail"></div><div class="knob" style="left:calc(' + off + '% - ' + ((off / 100) * 45).toFixed(1) + 'px)"></div>';
+
+    var rail = document.createElement("div");
+    rail.className = "rail";
+    d.appendChild(rail);
+
+    // One mark per detent, centred where the knob will come to rest. Built here
+    // rather than drawn with repeating-linear-gradient so the spacing stays tied
+    // to the same stopPct() the knob uses — the two can never drift apart.
+    for (var i = 1; i <= STOPS; i++) {
+      var tick = document.createElement("div");
+      // The first and last marks anchor the range; the eight between them are
+      // half the diameter so the ends read as the ends.
+      tick.className = (i === 1 || i === STOPS) ? "tick end" : "tick";
+      tick.style.left = tickLeft(stopPct(i));
+      d.appendChild(tick);
+    }
+
+    var k = document.createElement("div");
+    k.className = "knob";
+    k.style.left = knobLeft(stopPct(valueToStop(item, defaultValue(item))));
+    d.appendChild(k);
     return d;
   }
   function obtnEl(item) {
@@ -367,28 +442,38 @@
   }
 
   /* ---------- sliders (brightness, saturation, dim images, text size, spacing) ---------- */
-  function sliderVal(it) {
+  // The stop this site is currently on. A stored value from before 2.0.2 is
+  // continuous, so it is rounded here rather than reset.
+  function sliderStop(it) {
     var v = settings && settings[it.key] && settings[it.key][host];
-    return typeof v === "number" ? v : (it.off || 0);
+    if (typeof v !== "number") v = defaultValue(it);
+    return valueToStop(it, v);
   }
   function paintSlider(it) {
     var c = document.getElementById(it.id + "Ctrl");
     if (!c) return;
     var k = c.querySelector(".knob");
     if (!k) return;
-    var pct = Math.max(0, Math.min(100, sliderVal(it)));
-    k.style.left = "calc(" + pct + "% - " + ((pct / 100) * 45).toFixed(1) + "px)";
+    var i = sliderStop(it);
+    k.style.left = knobLeft(stopPct(i));
     c.setAttribute("role", "slider");
-    c.setAttribute("aria-valuemin", "0");
-    c.setAttribute("aria-valuemax", "100");
-    c.setAttribute("aria-valuenow", String(Math.round(pct)));
-    c.setAttribute("aria-label", it.name);
+    // The exposed scale is the one the user can see and say: 1..10, never the
+    // stored 0..100. "Brightness, 6 of 10" means something; "Brightness, 47"
+    // does not.
+    c.setAttribute("aria-valuemin", "1");
+    c.setAttribute("aria-valuemax", String(STOPS));
+    c.setAttribute("aria-valuenow", String(i));
+    c.setAttribute("aria-valuetext",
+      t("aria_step", "{n} of {max}").replace("{n}", String(i)).replace("{max}", String(STOPS)));
+    c.setAttribute("aria-label", t(it.id, it.name));
   }
-  function setSlider(it, pct) {
-    pct = Math.max(0, Math.min(100, Math.round(pct)));
+  function setStop(it, i) {
+    i = Math.max(1, Math.min(STOPS, Math.round(i)));
     if (!settings) return;
     if (!settings[it.key]) settings[it.key] = {};
-    settings[it.key][host] = pct;
+    var next = stopToValue(it, i);
+    if (settings[it.key][host] === next) { paintSlider(it); return; }  // no write, no re-apply
+    settings[it.key][host] = next;
     save();
     paintSlider(it);
   }
@@ -399,22 +484,30 @@
       c.tabIndex = 0;
       c.style.cursor = "pointer";
       var dragging = false;
-      var fromX = function (x) {
+      // Map the pointer onto the knob's CENTRE travel, not the raw track width:
+      // the knob centre only ever reaches KNOB_W/2 from either end, so measuring
+      // edge to edge would make the last detent almost unreachable.
+      var stopFromX = function (x) {
         var r = c.getBoundingClientRect();
-        return r.width ? (x - r.left) / r.width * 100 : 0;
+        var span = r.width - KNOB_W;
+        if (span <= 0) return 1;
+        var f = (x - r.left - KNOB_W / 2) / span;
+        return Math.round(Math.max(0, Math.min(1, f)) * (STOPS - 1)) + 1;
       };
       c.addEventListener("pointerdown", function (e) {
         dragging = true;
         try { c.setPointerCapture(e.pointerId); } catch (_) {}
-        setSlider(it, fromX(e.clientX));
+        setStop(it, stopFromX(e.clientX));
       });
-      c.addEventListener("pointermove", function (e) { if (dragging) setSlider(it, fromX(e.clientX)); });
+      c.addEventListener("pointermove", function (e) { if (dragging) setStop(it, stopFromX(e.clientX)); });
       c.addEventListener("pointerup", function () { dragging = false; });
       c.addEventListener("pointercancel", function () { dragging = false; });
       c.addEventListener("keydown", function (e) {
-        var v = sliderVal(it);
-        if (e.key === "ArrowRight" || e.key === "ArrowUp") { e.preventDefault(); setSlider(it, v + 5); }
-        else if (e.key === "ArrowLeft" || e.key === "ArrowDown") { e.preventDefault(); setSlider(it, v - 5); }
+        var i = sliderStop(it);
+        if (e.key === "ArrowRight" || e.key === "ArrowUp") { e.preventDefault(); setStop(it, i + 1); }
+        else if (e.key === "ArrowLeft" || e.key === "ArrowDown") { e.preventDefault(); setStop(it, i - 1); }
+        else if (e.key === "Home") { e.preventDefault(); setStop(it, 1); }
+        else if (e.key === "End")  { e.preventDefault(); setStop(it, STOPS); }
       });
     }
     paintSlider(it);
