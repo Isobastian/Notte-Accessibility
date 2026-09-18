@@ -149,6 +149,11 @@
 
   // place: "bottom" renders the control full-width beneath the label (like sliders).
   // key   : storage key. off: the slider value that means "tool off".
+  // held  : withdrawn for now — shown in the clock chip like a "soon" tool and
+  //         not switchable on. A ONE-WAY DOOR: a site that already has it on
+  //         keeps a working control so the user can still turn it OFF. Taking a
+  //         working accessibility feature away from someone relying on it,
+  //         silently, on update, is not something this product does.
   // min/max: the stored range the track spans (default 0..100). min:10 on the
   //          two brightness-based tools keeps the left end useful, not black.
   var ITEMS = {
@@ -165,7 +170,7 @@
       { id: "dimimg",     name: "Dim images",      desc: "Soften bright or busy images",             type: "slider", live: true, key: "dimimg", off: 100, min: 10 }
     ],
     reading: [
-      { id: "font",       name: "Dyslexia font",     desc: "Clearer, dyslexia-friendly",            type: "toggle", live: true },
+      { id: "font",       name: "Dyslexia font",     desc: "Clearer, dyslexia-friendly",            type: "toggle", live: true, held: true },
       { id: "readaloud",  name: "Read aloud",        desc: "Hear any page read aloud",              type: "toggle", pill: true },
       { id: "ruler",      name: "Reading ruler",     desc: "Highlight the line you're on",          type: "toggle", pill: true },
       { id: "magnifier",  name: "Magnifier",         desc: "Cursor-following lens (hold Alt)",      type: "toggle", pill: true },
@@ -338,6 +343,25 @@
   }
   function isStacked(item) {
     return item.type === "slider" || (item.type === "value" && item.place === "bottom");
+  }
+
+  /* ---------- withdrawn tools -----------------------------------------------
+   * A `held` tool is a "soon" tool for everyone EXCEPT the sites where it is
+   * already switched on, where it stays live so it can be switched off. Resolved
+   * on the ITEMS entry itself, because renderList(), wireRow() and syncLive()
+   * each read `live`/`pill` off that same object — resolving in only one of them
+   * would render a chip that still responded to clicks.
+   * ---------------------------------------------------------------------- */
+  function resolveHeld() {
+    Object.keys(ITEMS).forEach(function (tab) {
+      ITEMS[tab].forEach(function (it) {
+        if (!it.held) return;
+        var v = settings && settings[it.id] && settings[it.id][host];
+        var on = !!(v && v !== "off");
+        it.live = on;
+        it.pill = !on;
+      });
+    });
   }
 
   /* ---------- render a list of items ---------- */
@@ -544,7 +568,12 @@
     paintContrast();
   }
 
-  /* ---------- font (per-site, OFF <-> Dyslexic) ---------- */
+  /* ---------- font (per-site, OFF <-> Dyslexic) ----------------------------
+   * `font` is `held` (see ITEMS). This wiring runs only for a site that already
+   * has the font on, so the user can turn it off; once they do, the row becomes
+   * a clock chip on the next open and cannot be turned on again. Flip `held`
+   * off in ITEMS to bring the tool back exactly as it was.
+   * ---------------------------------------------------------------------- */
   function fontState() { return (settings && settings.font && settings.font[host]) || "off"; }
   function paintFont() {
     var c = document.getElementById("fontCtrl");
@@ -604,6 +633,7 @@
 
   /* ---------- tabs ---------- */
   function selectTab(tab) {
+    resolveHeld();
     currentTab = tab;
     var onVision = (tab === "vision");
     el.tabVision.setAttribute("aria-selected", String(onVision));

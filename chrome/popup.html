@@ -120,10 +120,20 @@
   /* Detent marks. One per stop, centred on where the knob comes to rest; the
      left offsets are written by popup.js from the same stopPct() the knob uses,
      so marks and knob cannot drift apart. */
-  .slider .tick{position:absolute;top:50%;width:4px;height:4px;margin:-2px 0 0 -2px;
-    border-radius:50%;background:rgba(157,151,246,.85);pointer-events:none;}
+  /* Centred with the SAME mechanism as the rail — top:50% plus a translate.
+     They used to use top:50% with a negative margin, which is arithmetically
+     identical but rasterises differently: measured at 2x, the marks painted one
+     device pixel above the rail. Two mechanisms, two rounding decisions. Keep
+     both on transforms and they cannot drift.
+     3px = the rail height exactly, so a mark sits INSIDE the line rather than
+     bulging through it. The left value from popup.js is the mark's centre, which
+     is what translateX(-50%) expects — so size changes need no margin maths. */
+  .slider .tick{position:absolute;top:50%;transform:translate(-50%,-50%);
+    width:3px;height:3px;border-radius:50%;background:rgba(157,151,246,.95);pointer-events:none;}
   /* The two ends anchor the range, so they carry twice the diameter. */
-  .slider .tick.end{width:8px;height:8px;margin:-4px 0 0 -4px;}
+  /* The two ends anchor the range. Odd size, so it stays symmetric about the
+     same centre line. */
+  .slider .tick.end{width:7px;height:7px;}
   .slider.deact .tick{opacity:.45;}
 
   /* ---- outline button (Apply / Set): Figma 68 x 36 ---- */

@@ -70,7 +70,8 @@ chrome/     CANONICAL source + master icons. EDIT HERE, then run sync.sh.
               images/          master icons, synced to the others: the SQUARE store icon
                                (icon-16…512, manifest.icons) and the CIRCLE toolbar icon
                                (toolbar-16…64, action.default_icon). Two different jobs.
-              fonts/           bundled OpenDyslexic woff2 + OFL.txt — synced to the others
+              fonts/           bundled OpenDyslexic woff2 + OFL.txt — synced to the others.
+                               STILL SHIPPED, but the font tool is held back (below).
               _locales/        UI strings: en (British, default) · en_US · it · fr · de · es
 firefox/    Same shared files + Firefox manifest (adds browser_specific_settings.gecko
               id + gecko_android for Firefox-Android; background uses "scripts").
@@ -253,7 +254,8 @@ working one down with it in Gecko.
   textsize:   { "example.com": 0..100 },     // >0 enlarges text (0 = off)
   letter:     { "example.com": 0..100 },     // >0 adds letter/word spacing (0 = off)
   paragraph:  { "example.com": 0..100 },     // >0 opens up line spacing (0 = off)
-  font:       { "example.com": "dyslexic" }  // clearer/dyslexia-friendly font ("off" = default)
+  font:       { "example.com": "dyslexic" }  // dyslexia font. HELD BACK in 2.0.2 — see below.
+                                             // Values are kept, not deleted; the engine still honours them.
 }
 ```
 
@@ -381,11 +383,29 @@ by clicking the toolbar button.
 **Adding a string:** add the key to all six `messages.json`, use `t("key", "English")`
 in `popup.js` or `data-i18n="key"` in `popup.html`, then run `sync.sh`.
 
+### Withdrawn tools — the `held` flag
+
+`font` (the dyslexia font) carries **`held: true`** in `ITEMS`. `resolveHeld()`,
+called at the top of `selectTab()`, resolves it per site into the ordinary
+`live`/`pill` flags, and it is a **one-way door**:
+
+- a site whose stored value is `"dyslexic"` → `live`, a working control, so the
+  user can still turn it **off**;
+- anything else (no key, or `"off"`) → `pill`, the clock chip, inert.
+
+It must be resolved on the ITEMS entry itself, because `renderList()`,
+`wireRow()` and `syncLive()` all read `live`/`pill` off that same object —
+resolving in only one of them renders a chip that still responds to clicks.
+`content.js` is deliberately **not** changed: the engine keeps honouring a
+setting the user already made, because silently removing an accessibility
+feature from someone relying on it is worse than withdrawing it from the menu.
+To bring the tool back, delete `held: true` — nothing else.
+
 ### Tools that are not built yet
 
-The six unfinished tools (read aloud, reading ruler, magnifier, large cursor, preset,
-shortcuts) show their **name inside a chip with a clock icon** (`.soonchip`), and
-their control is dimmed (`.item.pending`). There is deliberately **no badge word on
+The unfinished tools (read aloud, reading ruler, magnifier, large cursor, preset,
+shortcuts) and the withdrawn one (dyslexia font) show their **name inside a chip
+with a clock icon** (`.soonchip`), and their control is dimmed (`.item.pending`). There is deliberately **no badge word on
 screen**: a separate "SOON" pill sat beside `.name`, which is `white-space:nowrap`
 and cannot shrink, so it capped how long any translated tool name could be — Italian
 *Righello di lettura* + *IN ARRIVO* overflowed the 360px popup. The wording survives
@@ -482,10 +502,14 @@ equal.
   (`loadAndRender`) and is applied by `remap()` (Contrast), the overlay
   (warmth/brightness/saturation), or the `#__notte_adjust__` rule sheet
   (everything else).
-- **Font — done:** real **OpenDyslexic** is bundled (`chrome/fonts/*.woff2` +
-  `OFL.txt`, an `@font-face` in `content.js`, files declared in
-  `web_accessible_resources`, mirrored by `sync.sh`). **Text size** scales the
-  root `font-size`, so rem-based sites benefit most; px-hardcoded sites less.
+- **Font — built, but HELD BACK from 2.0.2.** Real **OpenDyslexic** is bundled
+  (`chrome/fonts/*.woff2` + `OFL.txt`, an `@font-face` in `content.js`, files
+  declared in `web_accessible_resources`, mirrored by `sync.sh`) and the switch
+  works — but the typography around it is not tuned, so it is withdrawn rather
+  than shipped half-finished. **Every claim about it has been removed from all
+  three store listings and the README**; do not put it back without turning the
+  tool back on. See *Withdrawn tools* below. **Text size** scales the root
+  `font-size`, so rem-based sites benefit most; px-hardcoded sites less.
 - **Still to build — standalone modules, not page-CSS tools:** Read aloud (TTS),
   Reading ruler, Magnifier, Large cursor, and the Profile plumbing (Remember /
   Preset / Shortcuts). Build these as their own components.

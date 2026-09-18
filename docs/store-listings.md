@@ -8,6 +8,12 @@ everywhere:
 Tagline used in the listings and the README heading: *from dark mode to full
 accessibility.*
 
+**Withdrawn from the copy, 15 September 2026 — the dyslexia font.** The tool is
+held back in 2.0.2 (shown as *Coming soon* in the popup), so no listing may claim
+it. Every mention has been removed from the text below. The font is still bundled
+and the switch still works for anyone who already had it on; it returns to the
+copy when the typography is tuned. See `claude/dyslexia-withdrawal.md`.
+
 Strategy: the accessibility mission leads (for users),
 while the term people actually search — **"dark mode"** — stays in a high-weight
 search field so discovery is preserved. Fill the values below into each store's
@@ -53,7 +59,7 @@ why neither appears in the keyword list below.
 
 ### Keywords (max 100, comma-separated, NO spaces) — 89 chars
 ```
-nightmode,eyestrain,contrast,readability,dyslexia,brightness,visualaid,glare,dimmer,sight
+nightmode,eyestrain,contrast,readability,brightness,visual,aid,glare,dimmer,sight,lowvision
 ```
 Rules Apple enforces or rewards: never repeat a word already in the app name or
 subtitle (it is wasted space — they are indexed anyway), no spaces after commas,
@@ -62,7 +68,7 @@ singular forms only, and no competitor names.
 ### Promotional Text (max 170) — 164 chars
 Editable **without** a new review, so use it for seasonal or roadmap news later.
 ```
-Dark mode is only the start. Contrast, brightness, saturation, text size, spacing and dyslexia-friendly fonts — per site, on any website. Free, no ads, no tracking.
+Dark mode is only the start. Contrast, brightness, saturation, warm tint, text size and spacing — per site, on any website. Free, no ads, no tracking.
 ```
 
 ### Description (max 4000) — 2411 chars
@@ -89,7 +95,6 @@ Every control is per-site and remembered, so a page you struggle with stays adju
 • Text size — enlarge text on any site
 • Letter and word spacing — open up crowded type
 • Line spacing — give paragraphs room to breathe
-• Font — switch to a clearer, dyslexia-friendly face (OpenDyslexic is bundled, so it works offline)
 • Emphasise links — underline every link so it is unmistakable
 • Strong focus — a thick, high-visibility outline for keyboard navigation
 • Reduce motion — stop animation and parallax
@@ -112,9 +117,8 @@ Notte is open source. Questions, ideas and contributions are welcome.
 Notte 2.0 is a complete rebuild.
 
 • A new engine. Instead of restyling elements one at a time, Notte now remaps each page's own stylesheets, so the theme holds as pages change and stays fast on long-lived web apps like webmail.
-• A full accessibility toolkit: guaranteed contrast, brightness, saturation, warm tint, dim images, text size, letter and word spacing, line spacing, dyslexia-friendly fonts, emphasised links, strong focus outlines and reduced motion — each one per site, and remembered.
+• A full accessibility toolkit: guaranteed contrast, brightness, saturation, warm tint, dim images, text size, letter and word spacing, line spacing, emphasised links, strong focus outlines and reduced motion — each one per site, and remembered.
 • Every tool now works on ordinary bright pages too, not only in dark mode.
-• OpenDyslexic is bundled, so the dyslexia-friendly font works offline.
 • Better colour handling on modern sites, including oklch() and Display-P3 colours.
 • Fixed: Saturation and Brightness did nothing in Safari while Warm tint was switched on.
 ```
@@ -131,7 +135,7 @@ To test:
    Mac: Safari → Settings → Extensions → tick Notte, then Edit Websites → Allow.
 2. Open any bright website (for example w3.org or wikipedia.org).
 3. Tap or click the Notte button in the Safari toolbar to open the controls.
-4. The main switch applies dark mode. The VISION and READING tabs hold the per-site tools (contrast, brightness, saturation, warm tint, dim images, text size, spacing, font, links, motion, focus).
+4. The main switch applies dark mode. The VISION and READING tabs hold the per-site tools (contrast, brightness, saturation, warm tint, dim images, text size, spacing, links, motion, focus).
 
 Website access is required because Notte reads and rewrites each page's stylesheets to remap its colours. Nothing is transmitted anywhere: there is no server, no analytics, no account, and settings are stored on device only. The extension's background script is a fetch relay used solely to re-download cross-origin stylesheets that the page has already loaded, so their colours can be remapped too; it stores and sends nothing.
 ```

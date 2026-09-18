@@ -57,8 +57,6 @@ remembered **per site**.
 - **Text size** — enlarges the page's type.
 - **Letter and word spacing** — opens up crowded text.
 - **Line spacing** — more air between lines.
-- **Clearer font** — swaps in a dyslexia-friendly face (OpenDyslexic is bundled
-  with the extension, so it works offline and on every site).
 - **Link emphasis** — underlines every link so they stop hiding in the text.
 - **Strong keyboard focus** — a thick, unmissable outline on the focused element.
 - **Reduced motion** — stops animation and parallax.
@@ -66,8 +64,16 @@ remembered **per site**.
 ### Still to come
 
 Named plainly so you know what is *not* in the extension yet: **magnifier**,
-**reading ruler**, **large cursor**, **read aloud**, and **profiles** (saved
-presets you can apply in one click). These are being built as their own modules.
+**reading ruler**, **large cursor**, **read aloud**, **profiles** (saved presets
+you can apply in one click), and the **clearer font** for dyslexia. Most are
+being built as their own modules.
+
+The dyslexia font is the odd one out: OpenDyslexic is already bundled and the
+switch works, but the typography around it — the text-size, letter-spacing and
+line-spacing ranges it needs to actually help — is not tuned yet. Rather than
+ship a half-finished accessibility feature and call it done, it is held back
+until it is right. Anyone who already had it switched on keeps the control, so
+nothing is taken away mid-use.
 
 ## How the engine works
 
