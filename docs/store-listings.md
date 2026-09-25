@@ -6,20 +6,22 @@ The **extension name and short description** come from `_locales/<lang>/messages
 
 **Notte — Accessibility & Dark Mode**
 
-Chrome enforces **45 characters for the name and 132 for the description per locale**,
-at upload, against every `messages.json` in the zip. Each language was **written to its
+The limits are **45 characters for the name and 112 for the description, per locale**.
+112 is **Safari's** limit (App Store Connect rejects the build with ITMS-90862 above it,
+checked for every locale inside the extension); Chrome's is 132, so 112 satisfies both.
+Chrome checks at upload against every `messages.json` in the zip. Each language was **written to its
 own limit, not translated** — the three ideas that must survive are *dark mode*,
 *low vision* and *no tracking*. Count characters after any edit, in every locale, and
 keep both keys in all six files (a missing key fails the whole upload).
 
 | Locale | Name | Description |
 |---|---|---|
-| `en` | Notte — Accessibility & Dark Mode (33/45) | High-contrast dark mode & accessibility for low vision — make any bright site comfortable to read. Free, no ads, no tracking. (125/132) |
-| `en_US` | Notte — Accessibility & Dark Mode (33/45) | High-contrast dark mode & accessibility for low vision — make any bright site comfortable to read. Free, no ads, no tracking. (125/132) |
-| `de` | Notte — Barrierefreiheit & Dunkelmodus (38/45) | Kontrastreicher Dunkelmodus bei Sehbehinderung – macht grelle Websites angenehm lesbar. Kostenlos, ohne Werbung, ohne Tracking. (127/132) |
-| `fr` | Notte — Accessibilité & Mode sombre (35/45) | Mode sombre à fort contraste pour la basse vision : les sites trop clairs deviennent lisibles. Gratuit, sans pub ni traçage. (124/132) |
-| `it` | Notte — Accessibilità e Modalità scura (38/45) | Modalità scura ad alto contrasto per ipovedenti: ogni sito abbagliante torna leggibile. Gratis, senza pubblicità né tracciamento. (129/132) |
-| `es` | Notte — Accesibilidad y Modo oscuro (35/45) | Modo oscuro de alto contraste para baja visión: lee cómodamente cualquier web demasiado clara. Gratis, sin anuncios ni rastreo. (127/132) |
+| `en` | Notte — Accessibility & Dark Mode (33/45) | High-contrast dark mode for low vision: bright sites become easy to read. Free, no ads, no tracking. (100/112) |
+| `en_US` | Notte — Accessibility & Dark Mode (33/45) | High-contrast dark mode for low vision: bright sites become easy to read. Free, no ads, no tracking. (100/112) |
+| `de` | Notte — Barrierefreiheit & Dunkelmodus (38/45) | Kontrastreicher Dunkelmodus bei Sehbehinderung – grelle Seiten werden gut lesbar. Kostenlos, ohne Tracking. (107/112) |
+| `fr` | Notte — Accessibilité & Mode sombre (35/45) | Mode sombre contrasté pour la basse vision : les sites trop clairs se lisent bien. Gratuit, sans traçage. (105/112) |
+| `it` | Notte — Accessibilità e Modalità scura (38/45) | Modalità scura ad alto contrasto per ipovedenti: i siti abbaglianti tornano leggibili. Senza tracciamento. (106/112) |
+| `es` | Notte — Accesibilidad y Modo oscuro (35/45) | Modo oscuro de alto contraste para baja visión: las webs muy claras se leen mejor. Gratis, sin rastreo. (103/112) |
 
 Tagline used in the listings and the README heading: *from dark mode to full
 accessibility.*
