@@ -393,9 +393,15 @@ called at the top of `selectTab()`, resolves it per site into the ordinary
   user can still turn it **off**;
 - anything else (no key, or `"off"`) → `pill`, the clock chip, inert.
 
+The row stays **visible** on purpose: users and NLnet reviewers should see the full
+shape of the product and which parts are not ready yet. (It was hidden entirely on
+24 September 2026 and restored on 25 September, before that ever shipped.)
+
 It must be resolved on the ITEMS entry itself, because `renderList()`,
 `wireRow()` and `syncLive()` all read `live`/`pill` off that same object —
 resolving in only one of them renders a chip that still responds to clicks.
+The six `font`/`font_desc` locale strings stay: the chip shows the tool's real name,
+and they label the off-switch for anyone who still has the font on.
 `content.js` is deliberately **not** changed: the engine keeps honouring a
 setting the user already made, because silently removing an accessibility
 feature from someone relying on it is worse than withdrawing it from the menu.
@@ -506,9 +512,10 @@ equal.
   (`chrome/fonts/*.woff2` + `OFL.txt`, an `@font-face` in `content.js`, files
   declared in `web_accessible_resources`, mirrored by `sync.sh`) and the switch
   works — but the typography around it is not tuned, so it is withdrawn rather
-  than shipped half-finished. **Every claim about it has been removed from all
-  three store listings and the README**; do not put it back without turning the
-  tool back on. See *Withdrawn tools* below. **Text size** scales the root
+  than shipped half-finished. **No store listing mentions it, not even as
+  coming**; the README lists it under *Still to come* and the popup shows it as a
+  clock chip. Do not put it back into the store copy without turning the tool back
+  on. See *Withdrawn tools* below. **Text size** scales the root
   `font-size`, so rem-based sites benefit most; px-hardcoded sites less.
 - **Still to build — standalone modules, not page-CSS tools:** Read aloud (TTS),
   Reading ruler, Magnifier, Large cursor, and the Profile plumbing (Remember /

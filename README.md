@@ -72,7 +72,8 @@ The dyslexia font is the odd one out: OpenDyslexic is already bundled and the
 switch works, but the typography around it — the text-size, letter-spacing and
 line-spacing ranges it needs to actually help — is not tuned yet. Rather than
 ship a half-finished accessibility feature and call it done, it is held back
-until it is right. Anyone who already had it switched on keeps the control, so
+until it is right. It is listed in the popup with a clock, like the other tools
+still to come. Anyone who already had it switched on keeps the control, so
 nothing is taken away mid-use.
 
 ## How the engine works

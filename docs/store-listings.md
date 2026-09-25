@@ -24,11 +24,13 @@ keep both keys in all six files (a missing key fails the whole upload).
 Tagline used in the listings and the README heading: *from dark mode to full
 accessibility.*
 
-**Withdrawn from the copy, 15 September 2026 — the dyslexia font.** The tool is
-held back in 2.0.2 (shown as *Coming soon* in the popup), so no listing may claim
-it. Every mention has been removed from the text below. The font is still bundled
-and the switch still works for anyone who already had it on; it returns to the
-copy when the typography is tuned. See `claude/dyslexia-withdrawal.md`.
+**Kept out of the copy — the dyslexia font (15 September 2026; popup row restored
+25 September).** The tool is built but held back until the typography around it is
+tuned. The popup lists it with a clock, like the other tools still to come, and it
+cannot be switched on; anyone who already had it on keeps a working off-switch. A
+clock chip reads as *not yet*; a line in a store listing does not — so no listing
+below may mention it, not even as coming. It returns to the copy when the tool is
+switched back on. See `claude/dyslexia-withdrawal.md`.
 
 Strategy: the accessibility mission leads (for users),
 while the term people actually search — **"dark mode"** — stays in a high-weight
