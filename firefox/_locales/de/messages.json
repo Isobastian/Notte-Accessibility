@@ -1,4 +1,10 @@
 {
+  "ext_name": {
+    "message": "Notte — Barrierefreiheit & Dunkelmodus"
+  },
+  "ext_description": {
+    "message": "Kontrastreicher Dunkelmodus bei Sehbehinderung – macht grelle Websites angenehm lesbar. Kostenlos, ohne Werbung, ohne Tracking."
+  },
   "dark": {
     "message": "Dunkelmodus"
   },

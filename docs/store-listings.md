@@ -1,9 +1,25 @@
 # Store listings — metadata for each browser store
 
-The **extension name** (the `name` field in every `manifest.json`) is identical
-everywhere:
+The **extension name and short description** come from `_locales/<lang>/messages.json`
+(`ext_name`, `ext_description`); every `manifest.json` points at them with
+`__MSG_ext_name__` / `__MSG_ext_description__`. English stays:
 
 **Notte — Accessibility & Dark Mode**
+
+Chrome enforces **45 characters for the name and 132 for the description per locale**,
+at upload, against every `messages.json` in the zip. Each language was **written to its
+own limit, not translated** — the three ideas that must survive are *dark mode*,
+*low vision* and *no tracking*. Count characters after any edit, in every locale, and
+keep both keys in all six files (a missing key fails the whole upload).
+
+| Locale | Name | Description |
+|---|---|---|
+| `en` | Notte — Accessibility & Dark Mode (33/45) | High-contrast dark mode & accessibility for low vision — make any bright site comfortable to read. Free, no ads, no tracking. (125/132) |
+| `en_US` | Notte — Accessibility & Dark Mode (33/45) | High-contrast dark mode & accessibility for low vision — make any bright site comfortable to read. Free, no ads, no tracking. (125/132) |
+| `de` | Notte — Barrierefreiheit & Dunkelmodus (38/45) | Kontrastreicher Dunkelmodus bei Sehbehinderung – macht grelle Websites angenehm lesbar. Kostenlos, ohne Werbung, ohne Tracking. (127/132) |
+| `fr` | Notte — Accessibilité & Mode sombre (35/45) | Mode sombre à fort contraste pour la basse vision : les sites trop clairs deviennent lisibles. Gratuit, sans pub ni traçage. (124/132) |
+| `it` | Notte — Accessibilità e Modalità scura (38/45) | Modalità scura ad alto contrasto per ipovedenti: ogni sito abbagliante torna leggibile. Gratis, senza pubblicità né tracciamento. (129/132) |
+| `es` | Notte — Accesibilidad y Modo oscuro (35/45) | Modo oscuro de alto contraste para baja visión: lee cómodamente cualquier web demasiado clara. Gratis, sin anuncios ni rastreo. (127/132) |
 
 Tagline used in the listings and the README heading: *from dark mode to full
 accessibility.*

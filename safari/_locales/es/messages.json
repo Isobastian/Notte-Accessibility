@@ -1,4 +1,10 @@
 {
+  "ext_name": {
+    "message": "Notte — Accesibilidad y Modo oscuro"
+  },
+  "ext_description": {
+    "message": "Modo oscuro de alto contraste para baja visión: lee cómodamente cualquier web demasiado clara. Gratis, sin anuncios ni rastreo."
+  },
   "dark": {
     "message": "Modo oscuro"
   },

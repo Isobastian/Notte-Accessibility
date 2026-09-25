@@ -1,9 +1,9 @@
 {
   "manifest_version": 3,
-  "name": "Notte — Accessibility & Dark Mode",
+  "name": "__MSG_ext_name__",
   "version": "2.0.2",
   "default_locale": "en",
-  "description": "High-contrast dark mode & accessibility for low vision — make any bright site comfortable to read. Free, no ads, no tracking.",
+  "description": "__MSG_ext_description__",
   "icons": {
     "16": "images/icon-16.png",
     "32": "images/icon-32.png",

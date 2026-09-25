@@ -1,4 +1,10 @@
 {
+  "ext_name": {
+    "message": "Notte — Accessibilità e Modalità scura"
+  },
+  "ext_description": {
+    "message": "Modalità scura ad alto contrasto per ipovedenti: ogni sito abbagliante torna leggibile. Gratis, senza pubblicità né tracciamento."
+  },
   "dark": {
     "message": "Modalità scura"
   },
