@@ -85,8 +85,9 @@ Rules Apple enforces or rewards: never repeat a word already in the app name or
 subtitle (it is wasted space — they are indexed anyway), no spaces after commas,
 singular forms only, and no competitor names.
 
-### Promotional Text (max 170) — 164 chars
+### Promotional Text (max 170) — 150 chars
 Editable **without** a new review, so use it for seasonal or roadmap news later.
+In use from 2.0.2 (26 September 2026).
 ```
 Dark mode is only the start. Contrast, brightness, saturation, warm tint, text size and spacing — per site, on any website. Free, no ads, no tracking.
 ```
@@ -132,15 +133,20 @@ Notte adapts pages for you, in your own browser. It is the opposite of a website
 Notte is open source. Questions, ideas and contributions are welcome.
 ```
 
-### What's New in This Version (max 4000) — 820 chars
+### What's New in This Version (max 4000) — 2.0.2, 642 chars
+Covers everything since 2.0, the last Apple release (so 2.0.1's fixes too). Used on
+both the iOS and macOS records; the last line is iPhone-only and may be dropped on
+macOS. No line about the dyslexia font — see the note at the top.
 ```
-Notte 2.0 is a complete rebuild.
+Notte 2.0.2 makes the controls easier to use and fixes pages that stayed hard to read.
 
-• A new engine. Instead of restyling elements one at a time, Notte now remaps each page's own stylesheets, so the theme holds as pages change and stays fast on long-lived web apps like webmail.
-• A full accessibility toolkit: guaranteed contrast, brightness, saturation, warm tint, dim images, text size, letter and word spacing, line spacing, emphasised links, strong focus outlines and reduced motion — each one per site, and remembered.
-• Every tool now works on ordinary bright pages too, not only in dark mode.
-• Better colour handling on modern sites, including oklch() and Display-P3 colours.
-• Fixed: Saturation and Brightness did nothing in Safari while Warm tint was switched on.
+• Sliders now move in ten clear steps, so a setting is easy to find again. Screen readers announce each step, for example "6 of 10".
+• New app and toolbar icons.
+• Notte's name and description now appear in English, German, French, Italian and Spanish.
+• Selected text stays visible when you switch to another window.
+• Buttons and panels no longer blend into the surface behind them.
+• Older websites that set their colours in HTML are now readable in dark mode.
+• Fixed: on iPhone, pages with heavy animation could reload themselves while Notte was on.
 ```
 
 ### Notes for App Review
